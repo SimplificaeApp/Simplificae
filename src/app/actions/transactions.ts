@@ -1,0 +1,211 @@
+'use server'
+
+import { revalidatePath } from 'next/cache'
+import { createClient } from '@/lib/supabase/server'
+
+export async function createTransaction(prevState: any, formData: FormData) {
+  const supabase = await createClient()
+
+  // Precisamos do Workspace ID, que pode vir oculto no formulário
+  const workspace_id = formData.get('workspace_id') as string
+  if (!workspace_id) return { error: 'Workspace não identificado.' }
+
+  const amountStr = formData.get('amount') as string
+  // Remove R$, pontos e converte vírgula para ponto
+  const numericAmount = parseFloat(amountStr.replace(/[^\d,-]/g, '').replace(',', '.'))
+  
+  if (isNaN(numericAmount) || numericAmount <= 0) {
+    return { error: 'Valor inválido.' }
+  }
+
+  const installmentsStr = formData.get('installments') as string
+  const installments = installmentsStr ? parseInt(installmentsStr, 10) : 1
+  const status = formData.get('status') as string || 'posted'
+  const baseDate = formData.get('date') as string
+
+  const baseData: any = {
+    workspace_id,
+    account_id: formData.get('account_id') as string,
+    type: formData.get('type') as string,
+    amount: installments > 1 ? numericAmount / installments : numericAmount,
+    description: formData.get('description') as string,
+    status: status,
+    ignore_in_cashflow: formData.get('ignore_in_cashflow') === 'on'
+  }
+
+  if (baseData.type === 'transfer') {
+    baseData.destination_account_id = formData.get('destination_account_id') as string
+    if (!baseData.destination_account_id || baseData.account_id === baseData.destination_account_id) {
+      return { error: 'Selecione uma conta de destino válida e diferente da origem.' }
+    }
+  } else {
+    baseData.category_id = formData.get('category_id') as string
+    if (!baseData.category_id) {
+      return { error: 'Selecione uma categoria.' }
+    }
+  }
+
+  if (!baseData.account_id || !baseData.description || !baseDate) {
+    return { error: 'Preencha todos os campos obrigatórios.' }
+  }
+
+  const transactionsToInsert = []
+  
+  if (installments > 1 && baseData.type !== 'transfer') {
+    const installment_id = crypto.randomUUID()
+    for (let i = 0; i < installments; i++) {
+      const dateObj = new Date(baseDate + 'T12:00:00')
+      dateObj.setMonth(dateObj.getMonth() + i)
+      
+      transactionsToInsert.push({
+        ...baseData,
+        date: dateObj.toISOString().split('T')[0],
+        description: `${baseData.description} (${i + 1}/${installments})`,
+        installment_id
+      })
+    }
+  } else {
+    transactionsToInsert.push({
+      ...baseData,
+      date: baseDate
+    })
+  }
+
+  const { error } = await supabase
+    .from('transactions')
+    .insert(transactionsToInsert)
+
+  if (error) {
+    console.error('Erro ao inserir transação:', error)
+    return { error: 'Ocorreu um erro ao salvar a transação.' }
+  }
+
+  // Se a transação for 'posted' e não for parcelada
+  if (status === 'posted' && installments === 1) {
+    const data = transactionsToInsert[0]
+    // Isso pode ser feito via Trigger no SQL (recomendado) ou aqui.
+    // Faremos via código por enquanto para simplicidade do MVP, 
+    // mas o ideal futuro é uma trigger bancária.
+    
+    // Pega o saldo atual da conta de origem
+    const { data: account } = await supabase
+      .from('accounts')
+      .select('initial_balance') // Usando initial_balance como field de controle por enquanto
+      .eq('id', data.account_id)
+      .single()
+      
+    if (account) {
+      let newBalance = Number(account.initial_balance)
+      if (data.type === 'income') newBalance += data.amount
+      if (data.type === 'expense' || data.type === 'transfer') newBalance -= data.amount
+      
+      await supabase
+        .from('accounts')
+        .update({ initial_balance: newBalance })
+        .eq('id', data.account_id)
+    }
+
+    // Se for transferência, adiciona na conta de destino
+    if (data.type === 'transfer' && data.destination_account_id) {
+      const { data: destAccount } = await supabase
+        .from('accounts')
+        .select('initial_balance')
+        .eq('id', data.destination_account_id)
+        .single()
+
+      if (destAccount) {
+        await supabase
+          .from('accounts')
+          .update({ initial_balance: Number(destAccount.initial_balance) + data.amount })
+          .eq('id', data.destination_account_id)
+      }
+    }
+  }
+
+  revalidatePath('/', 'layout')
+  return { success: 'Transação salva com sucesso!' }
+}
+
+export async function deleteTransaction(id: string) {
+  const supabase = await createClient()
+
+  // Buscar a transação antes de deletar para reverter o saldo
+  const { data: tx } = await supabase
+    .from('transactions')
+    .select('*, account:accounts(id, initial_balance)')
+    .eq('id', id)
+    .single()
+
+  if (!tx) return { error: 'Transação não encontrada.' }
+
+  // Reverter saldo da conta de origem
+  if (tx.status === 'posted' && tx.account) {
+    let newBalance = Number(tx.account.initial_balance)
+    if (tx.type === 'income') newBalance -= Number(tx.amount)
+    if (tx.type === 'expense' || tx.type === 'transfer') newBalance += Number(tx.amount)
+
+    await supabase
+      .from('accounts')
+      .update({ initial_balance: newBalance })
+      .eq('id', tx.account_id)
+
+    // Reverter conta de destino se for transferência
+    if (tx.type === 'transfer' && tx.destination_account_id) {
+      const { data: destAcc } = await supabase
+        .from('accounts')
+        .select('initial_balance')
+        .eq('id', tx.destination_account_id)
+        .single()
+
+      if (destAcc) {
+        await supabase
+          .from('accounts')
+          .update({ initial_balance: Number(destAcc.initial_balance) - Number(tx.amount) })
+          .eq('id', tx.destination_account_id)
+      }
+    }
+  }
+
+  const { error } = await supabase.from('transactions').delete().eq('id', id)
+  if (error) return { error: 'Erro ao excluir transação.' }
+
+  revalidatePath('/', 'layout')
+  return { success: 'Transação excluída com sucesso!' }
+}
+
+export async function payTransaction(id: string) {
+  const supabase = await createClient()
+
+  // Buscar transação
+  const { data: tx } = await supabase
+    .from('transactions')
+    .select('*, account:accounts(id, initial_balance)')
+    .eq('id', id)
+    .single()
+
+  if (!tx) return { error: 'Transação não encontrada.' }
+  if (tx.status === 'posted') return { error: 'Transação já foi paga.' }
+
+  // Atualizar para posted
+  const { error } = await supabase
+    .from('transactions')
+    .update({ status: 'posted' })
+    .eq('id', id)
+
+  if (error) return { error: 'Erro ao pagar transação.' }
+
+  // Atualizar saldo
+  if (tx.account) {
+    let newBalance = Number(tx.account.initial_balance)
+    if (tx.type === 'income') newBalance += Number(tx.amount)
+    if (tx.type === 'expense' || tx.type === 'transfer') newBalance -= Number(tx.amount)
+
+    await supabase
+      .from('accounts')
+      .update({ initial_balance: newBalance })
+      .eq('id', tx.account_id)
+  }
+
+  revalidatePath('/', 'layout')
+  return { success: 'Transação marcada como paga!' }
+}
