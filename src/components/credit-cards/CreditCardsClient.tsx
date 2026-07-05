@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import { Plus, CreditCard, Settings, Receipt, PlusCircle, ArrowRightLeft } from 'lucide-react'
 import { motion } from 'framer-motion'
 import { Modal } from '@/components/ui/Modal'
@@ -9,8 +9,9 @@ import { TransactionForm } from '@/components/transactions/TransactionForm'
 import { PayInvoiceForm } from './PayInvoiceForm'
 import { InvoiceTimelineModal } from './InvoiceTimelineModal'
 import { calculateCardBalances, getInvoiceForOffset } from '@/lib/creditCardUtils'
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend } from 'recharts'
-import { useMemo } from 'react'
+import dynamic from 'next/dynamic'
+
+const ReactECharts = dynamic(() => import('echarts-for-react'), { ssr: false, loading: () => <div className="h-full w-full bg-slate-50 rounded-xl animate-pulse" /> })
 
 interface CreditCardsClientProps {
   workspaceId: string
@@ -88,37 +89,61 @@ export function CreditCardsClient({ workspaceId, creditCards, allAccounts, categ
 
   const currencyFmt = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' })
 
-  const CustomBarTooltip = ({ active, payload, label }: any) => {
-    if (active && payload && payload.length) {
-      return (
-        <div className="bg-white/95 backdrop-blur-sm border border-slate-200 p-3 rounded-xl shadow-lg">
-          <p className="text-sm font-bold text-slate-700 mb-1">{label}</p>
-          <p className="text-sm font-black text-rose-600">
-            {currencyFmt.format(payload[0].value)}
-          </p>
-        </div>
-      )
-    }
-    return null
-  }
+  const barChartOption = useMemo(() => ({
+    grid: { top: 16, right: 16, bottom: 24, left: 0, containLabel: true },
+    tooltip: {
+      trigger: 'axis',
+      backgroundColor: 'rgba(255,255,255,0.97)',
+      borderColor: '#e2e8f0',
+      borderWidth: 1,
+      borderRadius: 12,
+      padding: [10, 14],
+      textStyle: { color: '#334155', fontSize: 12, fontFamily: 'inherit' },
+      formatter: (params: any[]) => {
+        const v = params[0]?.value || 0
+        return `<div style="font-size:11px;font-weight:700;color:#64748b;margin-bottom:4px">${params[0].axisValue}</div>` +
+          `<span style="color:#3b82f6;font-weight:900">${v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</span>`
+      }
+    },
+    xAxis: { type: 'category', data: barData.map((d: any) => d.name), axisLine: { show: false }, axisTick: { show: false }, axisLabel: { color: '#94a3b8', fontSize: 11, fontFamily: 'inherit' }, splitLine: { show: false } },
+    yAxis: { type: 'value', axisLine: { show: false }, axisTick: { show: false }, axisLabel: { color: '#94a3b8', fontSize: 11, fontFamily: 'inherit', formatter: (v: number) => v >= 1000 ? `${(v/1000).toFixed(1)}k` : String(v) }, splitLine: { lineStyle: { color: '#f1f5f9', type: 'dashed' } } },
+    series: [{
+      name: 'Total', type: 'bar', data: barData.map((d: any) => ({
+        value: d.Total,
+        label: { show: false },
+        txs: d.transactions
+      })),
+      itemStyle: { color: { type: 'linear', x: 0, y: 0, x2: 0, y2: 1, colorStops: [{ offset: 0, color: '#3b82f6' }, { offset: 1, color: '#60a5fa' }] }, borderRadius: [6, 6, 0, 0] },
+      barMaxWidth: 48,
+      animationDuration: 1000, animationEasing: 'elasticOut'
+    }]
+  }), [barData])
 
-  const CustomDonutTooltip = ({ active, payload }: any) => {
-    if (active && payload && payload.length) {
-      const data = payload[0].payload
-      return (
-        <div className="bg-white/95 backdrop-blur-sm border border-slate-200 p-3 rounded-xl shadow-lg">
-          <div className="flex items-center gap-2 mb-1">
-            <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: data.color }}></div>
-            <p className="text-sm font-bold text-slate-700">{data.name}</p>
-          </div>
-          <p className="text-sm font-black text-slate-900">
-            {currencyFmt.format(data.value)}
-          </p>
-        </div>
-      )
-    }
-    return null
-  }
+  const donutChartOption = useMemo(() => ({
+    tooltip: {
+      trigger: 'item',
+      backgroundColor: 'rgba(255,255,255,0.97)',
+      borderColor: '#e2e8f0',
+      borderWidth: 1,
+      borderRadius: 12,
+      padding: [10, 14],
+      textStyle: { color: '#334155', fontSize: 12, fontFamily: 'inherit' },
+      formatter: (p: any) => {
+        return `<div style="display:flex;align-items:center;gap:8px;margin-bottom:4px"><span style="width:10px;height:10px;border-radius:50%;background:${p.color};display:inline-block"></span><span style="font-weight:700;color:#334155">${p.name}</span></div>` +
+          `<div style="font-size:15px;font-weight:900;color:#0f172a">${p.value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</div>` +
+          `<div style="font-size:10px;color:#94a3b8;margin-top:2px">${p.percent.toFixed(1)}% do total</div>`
+      }
+    },
+    legend: { type: 'scroll', orient: 'horizontal', bottom: 0, textStyle: { color: '#64748b', fontSize: 11, fontFamily: 'inherit' }, icon: 'circle', itemWidth: 8, itemHeight: 8 },
+    series: [{
+      type: 'pie', radius: ['48%', '72%'], center: ['50%', '44%'],
+      padAngle: 4, itemStyle: { borderRadius: 6 },
+      label: { show: false },
+      emphasis: { scale: true, scaleSize: 8, itemStyle: { shadowBlur: 16, shadowOffsetY: 6, shadowColor: 'rgba(0,0,0,0.15)' } },
+      data: donutData.map((d: any) => ({ name: d.name, value: d.value, itemStyle: { color: d.color } })),
+      animationType: 'expansion', animationDuration: 1000, animationEasing: 'cubicOut'
+    }]
+  }), [donutData])
 
   const handleOpenNew = () => {
     setEditingCard(null)
@@ -203,47 +228,16 @@ export function CreditCardsClient({ workspaceId, creditCards, allAccounts, categ
               </div>
             </div>
             <div className="h-64 md:h-72 w-full">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart 
-                  data={barData} 
-                  margin={{ top: 10, right: 10, left: -10, bottom: 0 }}
-                >
-                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
-                  <XAxis 
-                    dataKey="name" 
-                    axisLine={false} 
-                    tickLine={false} 
-                    tick={{ fontSize: 11, fill: '#64748b' }} 
-                  />
-                  <YAxis 
-                    axisLine={false} 
-                    tickLine={false}
-                    width={35}
-                    tick={{ fontSize: 11, fill: '#64748b' }}
-                    tickFormatter={(v) => (v >= 1000 ? `${(v / 1000).toFixed(1)}k` : String(v))} 
-                  />
-                  <RechartsTooltip 
-                    content={<CustomBarTooltip />} 
-                    cursor={{ fill: '#f1f5f9' }} 
-                    wrapperStyle={{ 
-                      pointerEvents: 'none', 
-                      zIndex: 100,
-                      visibility: chartDetailsModal ? 'hidden' : 'visible'
-                    }} 
-                  />
-                  <Bar 
-                    dataKey="Total" 
-                    fill="#3b82f6" 
-                    radius={[4, 4, 0, 0]} 
-                    maxBarSize={50} 
-                    cursor="pointer"
-                    onClick={(data: any) => {
-                      const payload = data.payload || data
-                      setChartDetailsModal({ title: `Faturas de ${payload.name}`, transactions: payload.transactions || [] })
-                    }}
-                  />
-                </BarChart>
-              </ResponsiveContainer>
+              <ReactECharts 
+                option={barChartOption} 
+                style={{ height: '100%', width: '100%' }}
+                onEvents={{
+                  click: (params: any) => {
+                    const txs = params.data?.txs || []
+                    setChartDetailsModal({ title: `Faturas de ${params.name}`, transactions: txs })
+                  }
+                }}
+              />
             </div>
           </motion.div>
 
@@ -251,39 +245,18 @@ export function CreditCardsClient({ workspaceId, creditCards, allAccounts, categ
             <h3 className="font-bold text-slate-800 mb-6">Gastos por Categoria (Fatura Atual)</h3>
             <div className="h-64 md:h-72 w-full">
               {donutData.length > 0 ? (
-                <ResponsiveContainer width="100%" height="100%">
-                  <PieChart>
-                    <Pie
-                      data={donutData}
-                      cx="50%"
-                      cy="45%"
-                      innerRadius={60}
-                      outerRadius={85}
-                      paddingAngle={5}
-                      dataKey="value"
-                      strokeWidth={0}
-                      onClick={(_, index) => {
-                        const payload = donutData[index]
-                        if (payload) {
-                          setChartDetailsModal({ title: `Gastos: ${payload.name}`, transactions: payload.transactions || [] })
-                        }
-                      }}
-                    >
-                      {donutData.map((entry: any, index: number) => (
-                        <Cell key={`cell-${index}`} fill={entry.color} cursor="pointer" />
-                      ))}
-                    </Pie>
-                    <RechartsTooltip 
-                      content={<CustomDonutTooltip />} 
-                      wrapperStyle={{ 
-                        pointerEvents: 'none', 
-                        zIndex: 100,
-                        visibility: chartDetailsModal ? 'hidden' : 'visible'
-                      }} 
-                    />
-                    <Legend iconType="circle" wrapperStyle={{ fontSize: '12px' }} />
-                  </PieChart>
-                </ResponsiveContainer>
+                <div className="h-64 md:h-72 w-full">
+                  <ReactECharts 
+                    option={donutChartOption} 
+                    style={{ height: '100%', width: '100%' }}
+                    onEvents={{
+                      click: (params: any) => {
+                        const entry = donutData.find((d: any) => d.name === params.name)
+                        if (entry) setChartDetailsModal({ title: `Gastos: ${entry.name}`, transactions: entry.transactions || [] })
+                      }
+                    }}
+                  />
+                </div>
               ) : (
                 <div className="h-full flex items-center justify-center text-slate-400 text-sm">
                   Nenhum gasto na fatura atual.

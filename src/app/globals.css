@@ -1,14 +1,16 @@
 @import "tailwindcss";
 
 @theme {
-  /* Cores da Identidade Simplificaê */
+  /* Identidade FinanceOS */
   --color-emerald: #10b981;
+  --color-emerald-dark: #059669;
   --color-blue-tech: #3b82f6;
+  --color-rose-vivid: #f43f5e;
   --color-orange-action: #f97316;
-  --color-slate-bg: #f8fafc;
+  --color-slate-bg: #f1f5f9;
   --color-slate-text: #0f172a;
 
-  /* Tipografia Moderna */
+  /* Tipografia */
   --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
 }
 
@@ -32,36 +34,132 @@ input, textarea, select, [contenteditable="true"] {
   -webkit-user-select: auto;
 }
 
-/* Componentes Reutilizáveis (Sintaxe v4) */
+/* ─── Componentes Base ───────────────────────────────────── */
 @utility btn-primary {
-  background-color: var(--color-emerald);
+  background: linear-gradient(135deg, var(--color-emerald) 0%, var(--color-emerald-dark) 100%);
   color: white;
   font-weight: 700;
-  padding: 0.75rem 1.5rem;
-  border-radius: 0.5rem;
-  transition: transform 0.2s;
-  &:hover { transform: scale(1.02); }
-  &:active { transform: scale(0.95); }
+  padding: 0.625rem 1.25rem;
+  border-radius: 0.75rem;
+  transition: all 0.2s ease;
+  box-shadow: 0 4px 14px 0 rgba(16, 185, 129, 0.3);
+  &:hover { transform: translateY(-1px); box-shadow: 0 6px 20px 0 rgba(16, 185, 129, 0.4); }
+  &:active { transform: scale(0.97); }
 }
 
 @utility input-field {
   width: 100%;
-  padding: 1rem;
+  padding: 0.75rem 1rem;
   background-color: white;
   border: 1px solid #e2e8f0;
-  border-radius: 0.5rem;
+  border-radius: 0.75rem;
   outline: none;
+  font-size: 0.875rem;
   transition: all 0.2s;
-  &:focus { border-color: var(--color-blue-tech); box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.2); }
+  &:focus { border-color: var(--color-blue-tech); box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.12); }
 }
 
-/* Base UI Panels (Light Mode) */
+/* ─── Painéis ─────────────────────────────────────────────── */
 .glass-panel {
-  background: linear-gradient(180deg, #ffffff 0%, #fafafa 100%);
-  border: 1px solid #e2e8f0;
-  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.03);
+  background: #ffffff;
+  border: 1px solid rgba(226, 232, 240, 0.8);
+  box-shadow:
+    0 1px 3px rgba(0, 0, 0, 0.04),
+    0 4px 12px rgba(0, 0, 0, 0.04);
+  transition: box-shadow 0.2s ease, transform 0.2s ease;
 }
 
+.glass-panel:hover {
+  box-shadow:
+    0 1px 3px rgba(0, 0, 0, 0.05),
+    0 8px 24px rgba(0, 0, 0, 0.07);
+}
+
+/* ─── KPI Card ─────────────────────────────────────────────── */
+.kpi-card {
+  background: #ffffff;
+  border: 1px solid rgba(226, 232, 240, 0.8);
+  border-radius: 1rem;
+  padding: 1.25rem 1.5rem;
+  overflow: hidden;
+  position: relative;
+  transition: all 0.25s ease;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04), 0 4px 12px rgba(0, 0, 0, 0.04);
+}
+
+.kpi-card::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 3px;
+  border-radius: 1rem 1rem 0 0;
+  background: linear-gradient(90deg, var(--kpi-color-start, #10b981) 0%, var(--kpi-color-end, #059669) 100%);
+}
+
+.kpi-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
+}
+
+/* ─── Chart Wrappers ──────────────────────────────────────── */
+.chart-container {
+  position: relative;
+  width: 100%;
+}
+
+.chart-empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  gap: 0.5rem;
+  color: #94a3b8;
+  font-size: 0.875rem;
+}
+
+/* ─── Sidebar ──────────────────────────────────────────────── */
+.sidebar-link {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.625rem 0.875rem;
+  border-radius: 0.75rem;
+  font-weight: 600;
+  font-size: 0.875rem;
+  transition: all 0.18s ease;
+  color: #64748b;
+}
+
+.sidebar-link:hover {
+  background: #f1f5f9;
+  color: #1e293b;
+}
+
+.sidebar-link.active {
+  background: linear-gradient(135deg, rgba(16,185,129,0.12) 0%, rgba(5,150,105,0.08) 100%);
+  color: #059669;
+  box-shadow: inset 0 0 0 1px rgba(16, 185, 129, 0.2);
+}
+
+/* ─── Animações ───────────────────────────────────────────── */
+@keyframes fadeSlideUp {
+  from { opacity: 0; transform: translateY(12px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.animate-fade-slide-up {
+  animation: fadeSlideUp 0.35s ease forwards;
+}
+
+/* ─── Misc ────────────────────────────────────────────────── */
 @utility pb-safe {
   padding-bottom: env(safe-area-inset-bottom, 16px);
 }
+
+/* Scrollbar custom */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 99px; }
+::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+
