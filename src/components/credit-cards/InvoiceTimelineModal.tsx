@@ -84,24 +84,24 @@ export function InvoiceTimelineModal({ card, transactions, onEditTransaction }: 
                     e.stopPropagation()
                     if (onEditTransaction) onEditTransaction(tx)
                   }}
-                  className="p-3 flex items-center justify-between hover:bg-slate-50 cursor-pointer transition-colors"
+                  className="p-3 flex flex-wrap items-center justify-between hover:bg-slate-50 cursor-pointer transition-colors gap-2"
                 >
-                  <div className="flex items-center gap-3">
+                  <div className="flex items-center gap-3 min-w-0 flex-1">
                     <div 
-                      className="w-8 h-8 rounded-full flex items-center justify-center text-white shadow-sm"
+                      className="w-8 h-8 rounded-full flex items-center justify-center text-white shadow-sm shrink-0"
                       style={{ backgroundColor: tx.type === 'transfer' ? '#10b981' : (tx.category?.color || '#94a3b8') }}
                     >
                       {getTxIcon(tx)}
                     </div>
-                    <div>
-                      <p className="text-sm font-bold text-slate-700">{tx.description}</p>
-                      <p className="text-[10px] text-slate-400 font-medium">
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-bold text-slate-700 truncate">{tx.description}</p>
+                      <p className="text-[10px] text-slate-400 font-medium truncate">
                         {new Intl.DateTimeFormat('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' }).format(new Date(tx.date + 'T12:00:00'))}
                         {tx.type === 'transfer' && ' • Pagamento'}
                       </p>
                     </div>
                   </div>
-                  <span className={`text-sm font-bold ${tx.type === 'transfer' ? 'text-emerald-600' : 'text-slate-700'}`}>
+                  <span className={`text-sm font-bold ml-2 shrink-0 ${tx.type === 'transfer' ? 'text-emerald-600' : 'text-slate-700'}`}>
                     {tx.type === 'transfer' ? '+' : '-'} R$ {Number(tx.amount).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                   </span>
                 </div>

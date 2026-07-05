@@ -154,11 +154,11 @@ export function DashboardClient({
   const validCashflowTx = useMemo(() => {
     return filteredTx.filter(t => {
       if (t.ignore_in_cashflow) return false;
-      if (t.status !== 'posted') return false; 
-      
+      if (t.status !== 'posted' && t.status !== 'paid_planned') return false;
+
       const account = accounts.find(a => a.id === t.account_id);
-      if (account?.type === 'credit_card') return false; 
-      
+      if (account?.type === 'credit_card') return false;
+
       return true;
     });
   }, [filteredTx, accounts]);
@@ -168,7 +168,7 @@ export function DashboardClient({
     const now = new Date()
     const currentMonth = now.getMonth()
     const currentYear = now.getFullYear()
-    
+
     return validCashflowTx.filter(t => {
       const txDate = new Date(t.date + 'T12:00:00')
       return txDate.getMonth() === currentMonth && txDate.getFullYear() === currentYear
@@ -180,7 +180,7 @@ export function DashboardClient({
     () => currentMonthTx.filter((t) => t.type === "income").reduce((acc, t) => acc + Number(t.amount), 0),
     [currentMonthTx]
   );
-  
+
   // O pagamento da fatura do cartão é uma transferência de checking -> credit_card
   // Deve contar como despesa no dashboard (Only Current Month)
   const totalExpenses = useMemo(
@@ -367,7 +367,14 @@ export function DashboardClient({
 
   // ECharts options — Macro Bar Chart (6 meses)
   const macroBarOption = useMemo(() => ({
-    grid: { top: 16, right: 16, bottom: 24, left: 54, containLabel: false },
+    // AJUSTE AQUI: Aumentamos o recuo do topo e da base, e ativamos o containLabel
+    grid: {
+      top: 32,
+      right: 16,
+      bottom: 36, // Mais espaço para a legenda respirar embaixo do eixo X
+      left: 16,   // Reduzido de 54 para 16 porque o containLabel cuidará do espaçamento do texto do eixo Y
+      containLabel: true // O pulo do gato para evitar sobreposição automaticamente
+    },
     tooltip: {
       trigger: 'axis',
       backgroundColor: 'rgba(255,255,255,0.97)',
@@ -387,7 +394,14 @@ export function DashboardClient({
           `<div style="border-top:1px solid #f1f5f9;padding-top:8px;display:flex;justify-content:space-between;gap:16px"><span style="color:#64748b">Líquido</span><span style="color:${result >= 0 ? '#10b981' : '#f43f5e'};font-weight:900">${result >= 0 ? '+' : ''}${fmt(result)}</span></div>`
       }
     },
-    legend: { bottom: 0, textStyle: { color: '#64748b', fontSize: 11, fontFamily: 'inherit' }, icon: 'roundRect', itemWidth: 10, itemHeight: 10, itemGap: 20 },
+    legend: {
+      bottom: 0,
+      textStyle: { color: '#64748b', fontSize: 11, fontFamily: 'inherit' },
+      icon: 'roundRect',
+      itemWidth: 10,
+      itemHeight: 10,
+      itemGap: 20
+    },
     xAxis: { type: 'category', data: macroBarData.map(d => d.name), axisLine: { show: false }, axisTick: { show: false }, axisLabel: { color: '#94a3b8', fontSize: 11, fontFamily: 'inherit' }, splitLine: { show: false } },
     yAxis: { type: 'value', axisLine: { show: false }, axisTick: { show: false }, axisLabel: { color: '#94a3b8', fontSize: 11, fontFamily: 'inherit', formatter: (v: number) => v >= 1000 ? `${(v / 1000).toFixed(0)}k` : String(v) }, splitLine: { lineStyle: { color: '#f1f5f9', type: 'dashed' } } },
     series: [
@@ -726,9 +740,8 @@ export function DashboardClient({
               <div className="flex-1 min-h-0 h-48 md:h-full">
                 <ReactECharts option={gaugeOption} style={{ height: '100%', width: '100%' }} />
               </div>
-              <p className={`text-center text-xs font-bold mt-1 ${
-                spendingRate < 70 ? 'text-emerald-600' : spendingRate < 90 ? 'text-amber-500' : 'text-rose-600'
-              }`}>
+              <p className={`text-center text-xs font-bold mt-1 ${spendingRate < 70 ? 'text-emerald-600' : spendingRate < 90 ? 'text-amber-500' : 'text-rose-600'
+                }`}>
                 {spendingRate < 70 ? '✅ Dentro do orçamento' : spendingRate < 90 ? '⚠️ Atenção aos gastos' : '🚨 Gastos elevados'}
               </p>
             </motion.div>

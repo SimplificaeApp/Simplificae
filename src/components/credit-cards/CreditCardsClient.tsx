@@ -99,6 +99,7 @@ export function CreditCardsClient({ workspaceId, creditCards, allAccounts, categ
       borderRadius: 12,
       padding: [10, 14],
       textStyle: { color: '#334155', fontSize: 12, fontFamily: 'inherit' },
+      extraCssText: 'z-index: 40;',
       formatter: (params: any[]) => {
         const v = params[0]?.value || 0
         return `<div style="font-size:11px;font-weight:700;color:#64748b;margin-bottom:4px">${params[0].axisValue}</div>` +
@@ -128,6 +129,7 @@ export function CreditCardsClient({ workspaceId, creditCards, allAccounts, categ
       borderRadius: 12,
       padding: [10, 14],
       textStyle: { color: '#334155', fontSize: 12, fontFamily: 'inherit' },
+      extraCssText: 'z-index: 40;',
       formatter: (p: any) => {
         return `<div style="display:flex;align-items:center;gap:8px;margin-bottom:4px"><span style="width:10px;height:10px;border-radius:50%;background:${p.color};display:inline-block"></span><span style="font-weight:700;color:#334155">${p.name}</span></div>` +
           `<div style="font-size:15px;font-weight:900;color:#0f172a">${p.value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</div>` +
@@ -490,7 +492,7 @@ export function CreditCardsClient({ workspaceId, creditCards, allAccounts, categ
       >
         <div className="flex flex-col gap-3 max-h-[60vh] overflow-y-auto pr-2 pb-2">
           {chartDetailsModal?.transactions.map(tx => (
-            <div key={tx.id} className="flex justify-between items-center p-3 bg-white hover:bg-slate-50 transition-colors rounded-xl border border-slate-200 shadow-sm gap-2">
+            <div key={tx.id} className="flex flex-wrap justify-between items-center p-3 bg-white hover:bg-slate-50 transition-colors rounded-xl border border-slate-200 shadow-sm gap-2">
                <div className="flex items-center gap-3 min-w-0 flex-1">
                  <div 
                    className="w-10 h-10 rounded-xl flex items-center justify-center text-xl shadow-sm shrink-0"
