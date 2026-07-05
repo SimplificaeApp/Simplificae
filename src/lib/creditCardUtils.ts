@@ -118,7 +118,8 @@ export function calculateCardBalances(card: any, transactions: any[]) {
   let totalBalance = 0 // Saldo devedor total
 
   for (const tx of cardTx) {
-    const txDate = new Date(tx.date)
+    // Add T12:00:00 to avoid timezone shifting YYYY-MM-DD backwards by 3 hours in BRT
+    const txDate = new Date(tx.date + 'T12:00:00')
     
     // Gastos no cartão (account_id = card.id)
     if (tx.account_id === card.id && tx.type === 'expense') {
@@ -171,5 +172,80 @@ export function calculateCardBalances(card: any, transactions: any[]) {
       previous: previousTxs,
       next: nextTxs
     }
+  }
+}
+
+export function getInvoiceForOffset(card: any, transactions: any[], offsetMonths: number) {
+  const referenceDate = new Date()
+  referenceDate.setMonth(referenceDate.getMonth() + offsetMonths)
+  
+  const cycles = getCreditCardCycles(card.closing_day || 1, card.due_day || 10, referenceDate)
+  const cycle = cycles.current
+  
+  const cardTx = transactions.filter(t => t.account_id === card.id || t.destination_account_id === card.id)
+  
+  let total = 0
+  const txs: any[] = []
+  
+  for (const tx of cardTx) {
+    const txDate = new Date(tx.date + 'T12:00:00')
+    if (txDate >= cycle.start && txDate <= cycle.end) {
+      if (tx.account_id === card.id && tx.type === 'expense') {
+        total += Number(tx.amount)
+        txs.push(tx)
+      } else if (tx.destination_account_id === card.id && tx.type === 'transfer') {
+        total -= Number(tx.amount)
+        txs.push(tx)
+      }
+    }
+  }
+  
+  txs.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+  
+  let title = ''
+  let status = ''
+  let bg = ''
+  let color = ''
+  
+  if (offsetMonths === 0) {
+    title = 'Fatura Atual'
+    status = 'Aberta'
+    bg = 'bg-blue-50'
+    color = 'text-blue-500'
+  } else if (offsetMonths === -1) {
+    title = 'Fatura Anterior'
+    status = total <= 0 ? 'Paga' : 'Fechada'
+    bg = total <= 0 ? 'bg-emerald-50' : 'bg-rose-50'
+    color = total <= 0 ? 'text-emerald-500' : 'text-rose-500'
+  } else if (offsetMonths === 1) {
+    title = 'Próxima Fatura'
+    status = 'Futura'
+    bg = 'bg-slate-50'
+    color = 'text-slate-500'
+  } else if (offsetMonths < -1) {
+    title = `Fatura de ${new Intl.DateTimeFormat('pt-BR', { month: 'long' }).format(cycle.dueDate)}`
+    status = total <= 0 ? 'Paga' : 'Fechada'
+    bg = total <= 0 ? 'bg-emerald-50' : 'bg-rose-50'
+    color = total <= 0 ? 'text-emerald-500' : 'text-rose-500'
+  } else {
+    title = `Fatura de ${new Intl.DateTimeFormat('pt-BR', { month: 'long' }).format(cycle.dueDate)}`
+    status = 'Futura'
+    bg = 'bg-slate-50'
+    color = 'text-slate-500'
+  }
+
+  // Capitalize first letter of title
+  title = title.charAt(0).toUpperCase() + title.slice(1)
+
+  return {
+    title,
+    status,
+    bg,
+    color,
+    start: cycle.start,
+    end: cycle.end,
+    due: cycle.dueDate,
+    total: Math.max(0, total),
+    transactions: txs
   }
 }

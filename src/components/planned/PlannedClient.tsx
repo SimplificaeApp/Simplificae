@@ -45,6 +45,7 @@ export function PlannedClient({
 }) {
   const [activeTab, setActiveTab] = useState<'expense' | 'income'>('expense')
   const [isTxModalOpen, setIsTxModalOpen] = useState(false)
+  const [editingTx, setEditingTx] = useState<Transaction | null>(null)
   const [isPending, startTransition] = useTransition()
 
   const pendingExpenses = transactions.filter(t => t.type === 'expense')
@@ -82,7 +83,10 @@ export function PlannedClient({
           <p className="text-sm text-slate-500 mt-1">Organize suas contas a pagar e valores a receber.</p>
         </div>
         <button 
-          onClick={() => setIsTxModalOpen(true)}
+          onClick={() => {
+            setEditingTx(null)
+            setIsTxModalOpen(true)
+          }}
           className="btn-primary py-2.5 px-4 flex items-center gap-2 text-sm shadow-md shadow-emerald-500/20 hover:-translate-y-0.5 transition-all"
         >
           <Plus className="w-4 h-4" />
@@ -124,7 +128,14 @@ export function PlannedClient({
             {currentList.map(t => {
               const isOverdue = new Date(t.date + 'T12:00:00') < new Date(new Date().setHours(0,0,0,0))
               return (
-                <div key={t.id} className="p-4 md:p-5 flex flex-col md:flex-row md:items-center justify-between gap-4 group hover:bg-slate-50/50 transition-colors">
+                <div 
+                  key={t.id} 
+                  onClick={() => {
+                    setEditingTx(t)
+                    setIsTxModalOpen(true)
+                  }}
+                  className="p-4 md:p-5 flex flex-col md:flex-row md:items-center justify-between gap-4 group hover:bg-slate-50/50 cursor-pointer transition-colors"
+                >
                   <div className="flex items-center gap-4">
                     <div className={`w-12 h-12 rounded-2xl flex items-center justify-center text-xl shadow-sm ${
                       activeTab === 'expense' ? 'bg-rose-50 text-rose-600' : 'bg-emerald-50 text-emerald-600'
@@ -164,7 +175,10 @@ export function PlannedClient({
                     </div>
                     <div className="flex items-center gap-2">
                       <button
-                        onClick={() => handleDelete(t.id)}
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          handleDelete(t.id)
+                        }}
                         disabled={isPending}
                         className="w-10 h-10 rounded-xl flex items-center justify-center text-slate-400 hover:text-rose-500 hover:bg-rose-50 transition-colors disabled:opacity-50"
                         title="Excluir"
@@ -172,7 +186,10 @@ export function PlannedClient({
                         <Trash2 className="w-4 h-4" />
                       </button>
                       <button
-                        onClick={() => handlePay(t.id)}
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          handlePay(t.id)
+                        }}
                         disabled={isPending}
                         className={`px-4 py-2 rounded-xl text-sm font-bold text-white transition-all shadow-sm flex items-center gap-2 disabled:opacity-50 ${
                           activeTab === 'expense' 
@@ -202,14 +219,22 @@ export function PlannedClient({
 
       <Modal 
         isOpen={isTxModalOpen} 
-        onClose={() => setIsTxModalOpen(false)}
-        title="Novo Planejamento"
+        onClose={() => {
+          setIsTxModalOpen(false)
+          setEditingTx(null)
+        }}
+        title={editingTx ? "Editar Planejamento" : "Novo Planejamento"}
       >
         <TransactionForm
           workspaceId={workspaces[0]?.id}
           categories={categories}
           accounts={accounts}
-          onSuccess={() => setIsTxModalOpen(false)}
+          isPlanningMode={true}
+          initialData={editingTx}
+          onSuccess={() => {
+            setIsTxModalOpen(false)
+            setEditingTx(null)
+          }}
         />
       </Modal>
     </main>

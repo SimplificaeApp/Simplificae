@@ -8,7 +8,9 @@ import { CreditCardForm } from './CreditCardForm'
 import { TransactionForm } from '@/components/transactions/TransactionForm'
 import { PayInvoiceForm } from './PayInvoiceForm'
 import { InvoiceTimelineModal } from './InvoiceTimelineModal'
-import { calculateCardBalances } from '@/lib/creditCardUtils'
+import { calculateCardBalances, getInvoiceForOffset } from '@/lib/creditCardUtils'
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend } from 'recharts'
+import { useMemo } from 'react'
 
 interface CreditCardsClientProps {
   workspaceId: string
@@ -25,8 +27,98 @@ export function CreditCardsClient({ workspaceId, creditCards, allAccounts, categ
   const [isPayInvoiceOpen, setIsPayInvoiceOpen] = useState(false)
   const [isTimelineOpen, setIsTimelineOpen] = useState(false)
   
+  const [expandedCardId, setExpandedCardId] = useState<string | null>(null)
+  
   const [editingCard, setEditingCard] = useState<any>(null)
   const [selectedCard, setSelectedCard] = useState<any>(null)
+  const [editingTx, setEditingTx] = useState<any>(null)
+  const [isEditTransactionOpen, setIsEditTransactionOpen] = useState(false)
+  const [barChartOffset, setBarChartOffset] = useState(0)
+  const [chartDetailsModal, setChartDetailsModal] = useState<{ title: string, transactions: any[] } | null>(null)
+
+  const barData = useMemo(() => {
+    if (!creditCards.length) return []
+    const data = []
+    for (let i = barChartOffset - 5; i <= barChartOffset; i++) {
+      let total = 0
+      let monthLabel = ''
+      const txsForMonth: any[] = []
+      
+      for (const card of creditCards) {
+        const inv = getInvoiceForOffset(card, transactions, i)
+        total += inv.total
+        txsForMonth.push(...inv.transactions)
+        
+        if (!monthLabel) {
+          const d = new Date()
+          d.setMonth(d.getMonth() + i)
+          monthLabel = new Intl.DateTimeFormat('pt-BR', { month: 'short' }).format(d)
+        }
+      }
+      data.push({
+        name: monthLabel.charAt(0).toUpperCase() + monthLabel.slice(1),
+        Total: total,
+        transactions: txsForMonth
+      })
+    }
+    return data
+  }, [creditCards, transactions, barChartOffset])
+
+  const donutData = useMemo(() => {
+    if (!creditCards.length) return []
+    const catMap = new Map<string, { name: string, value: number, color: string, transactions: any[] }>()
+    for (const card of creditCards) {
+      const inv = getInvoiceForOffset(card, transactions, 0)
+      for (const tx of inv.transactions) {
+        if (tx.type === 'expense' && tx.account_id === card.id) {
+          const catName = tx.category?.name || 'Sem Categoria'
+          const catColor = tx.category?.color || '#94a3b8'
+          const existing = catMap.get(catName)
+          if (existing) {
+            existing.value += Number(tx.amount)
+            existing.transactions.push(tx)
+          } else {
+            catMap.set(catName, { name: catName, value: Number(tx.amount), color: catColor, transactions: [tx] })
+          }
+        }
+      }
+    }
+    return Array.from(catMap.values()).sort((a,b) => b.value - a.value).slice(0,5)
+  }, [creditCards, transactions])
+
+  const currencyFmt = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' })
+
+  const CustomBarTooltip = ({ active, payload, label }: any) => {
+    if (active && payload && payload.length) {
+      return (
+        <div className="bg-white/95 backdrop-blur-sm border border-slate-200 p-3 rounded-xl shadow-lg">
+          <p className="text-sm font-bold text-slate-700 mb-1">{label}</p>
+          <p className="text-sm font-black text-rose-600">
+            {currencyFmt.format(payload[0].value)}
+          </p>
+        </div>
+      )
+    }
+    return null
+  }
+
+  const CustomDonutTooltip = ({ active, payload }: any) => {
+    if (active && payload && payload.length) {
+      const data = payload[0].payload
+      return (
+        <div className="bg-white/95 backdrop-blur-sm border border-slate-200 p-3 rounded-xl shadow-lg">
+          <div className="flex items-center gap-2 mb-1">
+            <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: data.color }}></div>
+            <p className="text-sm font-bold text-slate-700">{data.name}</p>
+          </div>
+          <p className="text-sm font-black text-slate-900">
+            {currencyFmt.format(data.value)}
+          </p>
+        </div>
+      )
+    }
+    return null
+  }
 
   const handleOpenNew = () => {
     setEditingCard(null)
@@ -84,6 +176,124 @@ export function CreditCardsClient({ workspaceId, creditCards, allAccounts, categ
         </motion.button>
       </div>
 
+      {creditCards.length > 0 && (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+          <motion.div {...fadeUp} className="glass-panel p-6 rounded-2xl flex flex-col">
+            <div className="flex items-center justify-between mb-6">
+              <h3 className="font-bold text-slate-800">Evolução das Faturas</h3>
+              <div className="flex items-center gap-2">
+                <button 
+                  onClick={() => setBarChartOffset(prev => prev - 1)}
+                  className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors"
+                >
+                  <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg>
+                </button>
+                <button 
+                  onClick={() => setBarChartOffset(0)}
+                  className="text-xs font-bold text-slate-400 hover:text-slate-600 transition-colors px-2"
+                >
+                  Hoje
+                </button>
+                <button 
+                  onClick={() => setBarChartOffset(prev => prev + 1)}
+                  className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors"
+                >
+                  <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" /></svg>
+                </button>
+              </div>
+            </div>
+            <div className="h-64 md:h-72 w-full">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart 
+                  data={barData} 
+                  margin={{ top: 10, right: 10, left: -10, bottom: 0 }}
+                >
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
+                  <XAxis 
+                    dataKey="name" 
+                    axisLine={false} 
+                    tickLine={false} 
+                    tick={{ fontSize: 11, fill: '#64748b' }} 
+                  />
+                  <YAxis 
+                    axisLine={false} 
+                    tickLine={false}
+                    width={35}
+                    tick={{ fontSize: 11, fill: '#64748b' }}
+                    tickFormatter={(v) => (v >= 1000 ? `${(v / 1000).toFixed(1)}k` : String(v))} 
+                  />
+                  <RechartsTooltip 
+                    content={<CustomBarTooltip />} 
+                    cursor={{ fill: '#f1f5f9' }} 
+                    wrapperStyle={{ 
+                      pointerEvents: 'none', 
+                      zIndex: 100,
+                      visibility: chartDetailsModal ? 'hidden' : 'visible'
+                    }} 
+                  />
+                  <Bar 
+                    dataKey="Total" 
+                    fill="#3b82f6" 
+                    radius={[4, 4, 0, 0]} 
+                    maxBarSize={50} 
+                    cursor="pointer"
+                    onClick={(data: any) => {
+                      const payload = data.payload || data
+                      setChartDetailsModal({ title: `Faturas de ${payload.name}`, transactions: payload.transactions || [] })
+                    }}
+                  />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          </motion.div>
+
+          <motion.div {...fadeUp} transition={{ delay: 0.1 }} className="glass-panel p-6 rounded-2xl flex flex-col">
+            <h3 className="font-bold text-slate-800 mb-6">Gastos por Categoria (Fatura Atual)</h3>
+            <div className="h-64 md:h-72 w-full">
+              {donutData.length > 0 ? (
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie
+                      data={donutData}
+                      cx="50%"
+                      cy="45%"
+                      innerRadius={60}
+                      outerRadius={85}
+                      paddingAngle={5}
+                      dataKey="value"
+                      strokeWidth={0}
+                      onClick={(_, index) => {
+                        const payload = donutData[index]
+                        if (payload) {
+                          setChartDetailsModal({ title: `Gastos: ${payload.name}`, transactions: payload.transactions || [] })
+                        }
+                      }}
+                    >
+                      {donutData.map((entry: any, index: number) => (
+                        <Cell key={`cell-${index}`} fill={entry.color} cursor="pointer" />
+                      ))}
+                    </Pie>
+                    <RechartsTooltip 
+                      content={<CustomDonutTooltip />} 
+                      wrapperStyle={{ 
+                        pointerEvents: 'none', 
+                        zIndex: 100,
+                        visibility: chartDetailsModal ? 'hidden' : 'visible'
+                      }} 
+                    />
+                    <Legend iconType="circle" wrapperStyle={{ fontSize: '12px' }} />
+                  </PieChart>
+                </ResponsiveContainer>
+              ) : (
+                <div className="h-full flex items-center justify-center text-slate-400 text-sm">
+                  Nenhum gasto na fatura atual.
+                </div>
+              )}
+            </div>
+          </motion.div>
+        </div>
+      )}
+
       {creditCards.length === 0 ? (
         <motion.div {...fadeUp} className="text-center py-20 bg-slate-50 rounded-2xl border border-slate-200">
           <div className="w-16 h-16 bg-slate-100 rounded-full flex items-center justify-center mx-auto mb-4">
@@ -133,10 +343,39 @@ export function CreditCardsClient({ workspaceId, creditCards, allAccounts, categ
                   <span className="text-slate-500 font-medium">Limite Utilizado</span>
                   <span className="font-bold text-slate-700">R$ {calc.totals.totalDebt.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} <span className="text-slate-400 font-normal">/ R$ {limit.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span></span>
                 </div>
-                <div className="w-full bg-slate-100 rounded-full h-2.5 overflow-hidden">
+                <div className="w-full bg-slate-100 rounded-full h-2.5 overflow-hidden mb-4">
                   <div className="bg-emerald-500 h-2.5 rounded-full" style={{ width: `${usedPercentage}%`, backgroundColor: usedPercentage > 90 ? '#ef4444' : usedPercentage > 75 ? '#f59e0b' : '#10b981' }}></div>
                 </div>
+
+                <button 
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    setExpandedCardId(expandedCardId === card.id ? null : card.id)
+                  }}
+                  className="flex items-center justify-center gap-2 w-full py-2 text-xs font-bold text-slate-500 hover:text-slate-700 hover:bg-slate-50 rounded-lg transition-colors border border-transparent hover:border-slate-200"
+                >
+                  {expandedCardId === card.id ? 'Ocultar faturas' : 'Ver faturas'}
+                  <motion.div animate={{ rotate: expandedCardId === card.id ? 180 : 0 }}>
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
+                  </motion.div>
+                </button>
               </div>
+
+              {expandedCardId === card.id && (
+                <div 
+                  className="mt-4 pt-4 border-t border-slate-100"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <InvoiceTimelineModal 
+                    card={{ ...card, calc }} 
+                    transactions={transactions}
+                    onEditTransaction={(tx) => {
+                      setEditingTx(tx)
+                      setIsEditTransactionOpen(true)
+                    }}
+                  />
+                </div>
+              )}
             </motion.div>
           )})}
         </div>
@@ -246,7 +485,67 @@ export function CreditCardsClient({ workspaceId, creditCards, allAccounts, categ
         onClose={() => setIsTimelineOpen(false)}
         title={`Faturas: ${selectedCard?.name}`}
       >
-        <InvoiceTimelineModal card={selectedCard} />
+        <InvoiceTimelineModal 
+          card={selectedCard} 
+          transactions={transactions}
+          onEditTransaction={(tx) => {
+            setEditingTx(tx)
+            setIsEditTransactionOpen(true)
+          }}
+        />
+      </Modal>
+
+      <Modal
+        isOpen={isEditTransactionOpen}
+        onClose={() => setIsEditTransactionOpen(false)}
+        title="Editar Despesa do Cartão"
+      >
+        <TransactionForm 
+          workspaceId={workspaceId}
+          categories={categories}
+          accounts={allAccounts}
+          onSuccess={() => setIsEditTransactionOpen(false)}
+          isCreditCard={true}
+          initialData={editingTx}
+        />
+      </Modal>
+
+      <Modal
+        isOpen={!!chartDetailsModal}
+        onClose={() => setChartDetailsModal(null)}
+        title={chartDetailsModal?.title || 'Detalhes'}
+      >
+        <div className="flex flex-col gap-3 max-h-[60vh] overflow-y-auto pr-2 pb-2">
+          {chartDetailsModal?.transactions.map(tx => (
+            <div key={tx.id} className="flex justify-between items-center p-3 bg-white hover:bg-slate-50 transition-colors rounded-xl border border-slate-200 shadow-sm gap-2">
+               <div className="flex items-center gap-3 min-w-0 flex-1">
+                 <div 
+                   className="w-10 h-10 rounded-xl flex items-center justify-center text-xl shadow-sm shrink-0"
+                   style={{ 
+                     backgroundColor: `${tx.category?.color || '#94a3b8'}15`, 
+                     border: `1px solid ${tx.category?.color || '#94a3b8'}30` 
+                   }}
+                 >
+                   {tx.category?.icon || '🏷️'}
+                 </div>
+                 <div className="min-w-0 flex-1">
+                    <p className="font-bold text-slate-800 text-sm truncate">{tx.description}</p>
+                    <p className="text-xs text-slate-500 truncate">
+                      {new Date(tx.date + 'T12:00:00').toLocaleDateString('pt-BR')} 
+                      {tx.category?.name ? ` • ${tx.category.name}` : ''}
+                      {allAccounts.find(a => a.id === tx.account_id) ? ` • ${allAccounts.find(a => a.id === tx.account_id)?.name}` : ''}
+                    </p>
+                 </div>
+               </div>
+               <span className="font-bold text-slate-700 whitespace-nowrap ml-2 shrink-0">
+                 R$ {Number(tx.amount).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+               </span>
+            </div>
+          ))}
+          {chartDetailsModal?.transactions.length === 0 && (
+            <p className="text-center text-slate-400 text-sm py-4">Nenhuma transação encontrada.</p>
+          )}
+        </div>
       </Modal>
     </>
   )
