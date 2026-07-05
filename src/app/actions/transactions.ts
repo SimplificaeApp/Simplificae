@@ -134,17 +134,26 @@ export async function deleteTransaction(id: string) {
   const supabase = await createClient()
 
   // Buscar a transação antes de deletar para reverter o saldo
-  const { data: tx } = await supabase
+  const { data: tx, error: fetchError } = await supabase
     .from('transactions')
-    .select('*, account:accounts(id, initial_balance)')
+    .select('*')
     .eq('id', id)
     .single()
 
-  if (!tx) return { error: 'Transação não encontrada.' }
+  if (!tx) {
+    console.error("Delete Transaction Error:", fetchError, "ID:", id);
+    return { error: 'Transação não encontrada.' }
+  }
+
+  let account = null
+  if (tx.account_id) {
+    const { data: acc } = await supabase.from('accounts').select('id, initial_balance').eq('id', tx.account_id).single()
+    account = acc
+  }
 
   // Reverter saldo da conta de origem
-  if (tx.status === 'posted' && tx.account) {
-    let newBalance = Number(tx.account.initial_balance)
+  if (tx.status === 'posted' && account) {
+    let newBalance = Number(account.initial_balance)
     if (tx.type === 'income') newBalance -= Number(tx.amount)
     if (tx.type === 'expense' || tx.type === 'transfer') newBalance += Number(tx.amount)
 
@@ -177,32 +186,99 @@ export async function deleteTransaction(id: string) {
   return { success: 'Transação excluída com sucesso!' }
 }
 
-export async function payTransaction(id: string) {
+export async function payTransactionNew(id: string) {
+  console.error("SERVER ACTION: payTransactionNew started for id:", id);
   const supabase = await createClient()
 
   // Buscar transação
-  const { data: tx } = await supabase
+  const { data: tx, error: fetchError } = await supabase
     .from('transactions')
-    .select('*, account:accounts(id, initial_balance)')
+    .select('*')
     .eq('id', id)
     .single()
 
-  if (!tx) return { error: 'Transação não encontrada.' }
-  if (tx.status === 'posted') return { error: 'Transação já foi paga.' }
+  if (!tx) {
+    console.error("SERVER ACTION: !tx IS TRUE. fetchError:", fetchError, "ID:", id);
+    return { error: 'Transação não encontrada.' }
+  }
+  if (tx.status === 'paid_planned' || tx.status === 'posted') {
+    console.error("SERVER ACTION: tx already paid. status:", tx.status);
+    return { error: 'Transação já foi paga.' }
+  }
 
-  // Atualizar para posted
+  let account = null
+  if (tx.account_id) {
+    const { data: acc, error: accErr } = await supabase.from('accounts').select('id, initial_balance').eq('id', tx.account_id).single()
+    if (accErr) {
+      console.error("SERVER ACTION: Error fetching account:", accErr);
+    }
+    account = acc
+  }
+
+  // Atualizar para paid_planned (para manter na tela de planejamento)
   const { error } = await supabase
     .from('transactions')
-    .update({ status: 'posted' })
+    .update({ status: 'paid_planned' })
     .eq('id', id)
 
-  if (error) return { error: 'Erro ao pagar transação.' }
+  if (error) {
+    console.error("SERVER ACTION: Error updating transaction:", error);
+    return { error: 'Erro ao pagar transação.' }
+  }
 
   // Atualizar saldo
-  if (tx.account) {
-    let newBalance = Number(tx.account.initial_balance)
+  if (account) {
+    let newBalance = Number(account.initial_balance)
     if (tx.type === 'income') newBalance += Number(tx.amount)
     if (tx.type === 'expense' || tx.type === 'transfer') newBalance -= Number(tx.amount)
+
+    const { error: balanceErr } = await supabase
+      .from('accounts')
+      .update({ initial_balance: newBalance })
+      .eq('id', tx.account_id)
+      
+    if (balanceErr) {
+      console.error("SERVER ACTION: Error updating balance:", balanceErr);
+    }
+  }
+
+  revalidatePath('/', 'layout')
+  console.error("SERVER ACTION: payTransactionNew SUCCESS");
+  return { success: 'Transação marcada como paga!' }
+}
+
+export async function unpayTransaction(id: string) {
+  const supabase = await createClient()
+
+  const { data: tx, error: fetchError } = await supabase
+    .from('transactions')
+    .select('*')
+    .eq('id', id)
+    .single()
+
+  if (!tx) {
+    console.error("Unpay Transaction Error:", fetchError, "ID:", id);
+    return { error: 'Transação não encontrada.' }
+  }
+  if (tx.status === 'pending') return { error: 'Transação já está pendente.' }
+
+  let account = null
+  if (tx.account_id) {
+    const { data: acc } = await supabase.from('accounts').select('id, initial_balance').eq('id', tx.account_id).single()
+    account = acc
+  }
+
+  const { error } = await supabase
+    .from('transactions')
+    .update({ status: 'pending' })
+    .eq('id', id)
+
+  if (error) return { error: 'Erro ao desmarcar transação.' }
+
+  if (account) {
+    let newBalance = Number(account.initial_balance)
+    if (tx.type === 'income') newBalance -= Number(tx.amount)
+    if (tx.type === 'expense' || tx.type === 'transfer') newBalance += Number(tx.amount)
 
     await supabase
       .from('accounts')
@@ -211,7 +287,7 @@ export async function payTransaction(id: string) {
   }
 
   revalidatePath('/', 'layout')
-  return { success: 'Transação marcada como paga!' }
+  return { success: 'Lançamento desmarcado com sucesso!' }
 }
 
 export async function updateTransaction(id: string, prevState: any, formData: FormData) {

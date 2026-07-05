@@ -27,7 +27,7 @@ export default async function PlannedPage() {
         .from('transactions')
         .select('*, category:categories(id, name, icon, color), account:accounts!transactions_account_id_fkey(id, name, color, icon)')
         .eq('workspace_id', currentWorkspace.id)
-        .eq('status', 'pending')
+        .in('status', ['pending', 'paid_planned'])
         .order('date', { ascending: true }),
       supabase
         .from('categories')

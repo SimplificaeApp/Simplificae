@@ -267,11 +267,18 @@ export function TransactionsClient({
   }, [transactions, search, typeFilter, selectedMonth, selectedYear, accounts])
 
   const handleDelete = (id: string) => {
-    if (!confirm('Tem certeza que deseja excluir esta transação?')) return
-    startTransition(async () => {
-      const res = await deleteTransaction(id)
-      if (res?.error) toast.error(res.error)
-      else toast.success('Transação excluída!')
+    toast('Tem certeza que deseja excluir esta transação?', {
+      action: {
+        label: 'Sim, excluir',
+        onClick: () => {
+          startTransition(async () => {
+            const res = await deleteTransaction(id)
+            if (res?.error) toast.error(res.error)
+            else toast.success('Transação excluída!')
+          })
+        }
+      },
+      cancel: { label: 'Cancelar', onClick: () => {} }
     })
   }
 

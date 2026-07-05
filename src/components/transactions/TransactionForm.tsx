@@ -1,6 +1,7 @@
 'use client'
 
-import { useState, useActionState, useEffect } from 'react'
+import { useState, useActionState, useEffect, startTransition } from 'react'
+import { toast } from 'sonner'
 import { useRouter } from 'next/navigation'
 import { createTransaction, updateTransaction, deleteTransaction } from '@/app/actions/transactions'
 import { ArrowRight, Loader2, TrendingUp, TrendingDown, ArrowRightLeft, Trash2 } from 'lucide-react'
@@ -57,17 +58,26 @@ export function TransactionForm({ workspaceId, categories, accounts, onSuccess, 
     }
   }, [state.success, onSuccess, router])
 
-  const handleDelete = async () => {
-    if (!initialData || !confirm('Tem certeza que deseja excluir esta transação?')) return
-    setIsDeleting(true)
-    const res = await deleteTransaction(initialData.id)
-    if (res?.error) {
-      alert(res.error)
-      setIsDeleting(false)
-    } else {
-      router.refresh()
-      if (onSuccess) onSuccess()
-    }
+  const handleDelete = () => {
+    if (!initialData) return
+    toast('Tem certeza que deseja excluir esta transação?', {
+      action: {
+        label: 'Sim, excluir',
+        onClick: () => {
+          setIsDeleting(true)
+          startTransition(async () => {
+            const res = await deleteTransaction(initialData.id)
+            setIsDeleting(false)
+            if (res?.error) toast.error(res.error)
+            else {
+              toast.success('Transação excluída!')
+              if (onSuccess) onSuccess()
+            }
+          })
+        }
+      },
+      cancel: { label: 'Cancelar', onClick: () => {} }
+    })
   }
 
   // Formata o input de valor para moeda R$

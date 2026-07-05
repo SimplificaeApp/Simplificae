@@ -19,13 +19,22 @@ type Transaction = {
   amount: number
   type: string
   date: string
+  status?: string
   category_id?: string
   account_id?: string
+  destination_account_id?: string
   ignore_in_cashflow?: boolean
   category?: { id: string; name: string; icon?: string; color?: string } | null
 }
 type Category = { id: string; name: string; type: string; icon?: string; color?: string }
-type Account = { id: string; name: string; icon?: string; color?: string }
+type Account = {
+  id: string
+  name: string
+  icon: string
+  color: string
+  type: string
+  initial_balance: number
+}
 
 const currencyFmt = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' })
 const MONTHS_SHORT = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez']
@@ -81,9 +90,16 @@ export function ReportsClient({
 
   const filteredTx = useMemo(() => {
     return transactions.filter(t => {
+      if (t.status === 'pending') return false // Lançamentos futuros não entram no relatório
+      if (t.status !== 'posted' && t.status !== 'paid_planned') return false
       if (selectedAccount !== 'all' && t.account_id !== selectedAccount) return false
       if (selectedCategory !== 'all' && t.category_id !== selectedCategory) return false
       if (t.ignore_in_cashflow) return false
+      
+      // Matches Dashboard: O pagamento da fatura (transferência) entra, despesas do cartão em si saem
+      const account = accounts.find(a => a.id === t.account_id)
+      if (account?.type === 'credit_card') return false
+      
       return true
     })
   }, [transactions, selectedAccount, selectedCategory])
@@ -97,7 +113,14 @@ export function ReportsClient({
 
   const dre = useMemo(() => {
     const incomes = monthlyTx.filter(t => t.type === 'income')
-    const expenses = monthlyTx.filter(t => t.type === 'expense')
+    const expenses = monthlyTx.filter(t => {
+      if (t.type === "expense") return true;
+      if (t.type === "transfer") {
+        const destAcc = accounts.find(a => a.id === t.destination_account_id);
+        if (destAcc?.type === 'credit_card') return true;
+      }
+      return false;
+    })
     const totalIncome = incomes.reduce((a, t) => a + Number(t.amount), 0)
     const totalExpense = expenses.reduce((a, t) => a + Number(t.amount), 0)
 
