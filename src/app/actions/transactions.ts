@@ -293,3 +293,42 @@ export async function updateTransaction(id: string, prevState: any, formData: Fo
   revalidatePath('/', 'layout')
   return { success: 'Transação atualizada!' }
 }
+
+export async function markAsPosted(id: string) {
+  'use server'
+  const supabase = await createClient()
+
+  // Fetch the transaction
+  const { data: tx, error: fetchErr } = await supabase
+    .from('transactions')
+    .select('*')
+    .eq('id', id)
+    .single()
+
+  if (fetchErr || !tx) return { error: 'Transação não encontrada.' }
+  if (tx.status === 'posted') return { error: 'Já está confirmada.' }
+
+  // Update account balance
+  if (tx.account_id) {
+    const { data: acc } = await supabase.from('accounts').select('initial_balance').eq('id', tx.account_id).single()
+    if (acc) {
+      let newBalance = Number(acc.initial_balance)
+      if (tx.type === 'income') newBalance += Number(tx.amount)
+      if (tx.type === 'expense' || tx.type === 'transfer') newBalance -= Number(tx.amount)
+      await supabase.from('accounts').update({ initial_balance: newBalance }).eq('id', tx.account_id)
+    }
+    // Handle transfer destination
+    if (tx.type === 'transfer' && tx.destination_account_id) {
+      const { data: dest } = await supabase.from('accounts').select('initial_balance').eq('id', tx.destination_account_id).single()
+      if (dest) {
+        await supabase.from('accounts').update({ initial_balance: Number(dest.initial_balance) + Number(tx.amount) }).eq('id', tx.destination_account_id)
+      }
+    }
+  }
+
+  const { error } = await supabase.from('transactions').update({ status: 'posted' }).eq('id', id)
+  if (error) return { error: 'Erro ao confirmar transação.' }
+
+  revalidatePath('/', 'layout')
+  return { success: 'Transação confirmada!' }
+}
