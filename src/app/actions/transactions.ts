@@ -45,8 +45,12 @@ export async function createTransaction(prevState: any, formData: FormData) {
     }
   }
 
-  if (!baseData.account_id || !baseData.description || !baseDate) {
-    return { error: 'Preencha todos os campos obrigatórios.' }
+  if (!baseData.description || !baseDate) {
+    return { error: 'Preencha a descrição e a data.' }
+  }
+
+  if (status === 'posted' && !baseData.account_id) {
+    return { error: 'Selecione uma conta para transações efetivadas.' }
   }
 
   const transactionsToInsert = []
@@ -208,4 +212,84 @@ export async function payTransaction(id: string) {
 
   revalidatePath('/', 'layout')
   return { success: 'Transação marcada como paga!' }
+}
+
+export async function updateTransaction(id: string, prevState: any, formData: FormData) {
+  const supabase = await createClient()
+
+  // 1. Fetch old transaction to revert balances
+  const { data: oldTx } = await supabase.from('transactions').select().eq('id', id).single()
+  if (!oldTx) return { error: 'Transação não encontrada.' }
+
+  // 2. Validate and parse new data
+  const amountStr = formData.get('amount') as string
+  const numericAmount = parseFloat(amountStr.replace(/[^\d,-]/g, '').replace(',', '.'))
+  
+  if (isNaN(numericAmount) || numericAmount <= 0) {
+    return { error: 'Valor inválido.' }
+  }
+
+  const baseData: any = {
+    account_id: formData.get('account_id') as string,
+    type: formData.get('type') as string,
+    amount: numericAmount,
+    description: formData.get('description') as string,
+    status: formData.get('status') as string || 'posted',
+    date: formData.get('date') as string,
+    ignore_in_cashflow: formData.get('ignore_in_cashflow') === 'on'
+  }
+
+  if (baseData.type === 'transfer') {
+    baseData.destination_account_id = formData.get('destination_account_id') as string
+  } else {
+    baseData.category_id = formData.get('category_id') as string
+    baseData.destination_account_id = null
+  }
+
+  if (!baseData.description || !baseData.date) {
+    return { error: 'Preencha a descrição e a data.' }
+  }
+
+  // 3. Revert Old Balances
+  if (oldTx.status === 'posted' && oldTx.account_id) {
+    const { data: oldAcc } = await supabase.from('accounts').select('initial_balance').eq('id', oldTx.account_id).single()
+    if (oldAcc) {
+      let revertedBalance = Number(oldAcc.initial_balance)
+      if (oldTx.type === 'income') revertedBalance -= Number(oldTx.amount)
+      if (oldTx.type === 'expense' || oldTx.type === 'transfer') revertedBalance += Number(oldTx.amount)
+      await supabase.from('accounts').update({ initial_balance: revertedBalance }).eq('id', oldTx.account_id)
+    }
+
+    if (oldTx.type === 'transfer' && oldTx.destination_account_id) {
+      const { data: oldDest } = await supabase.from('accounts').select('initial_balance').eq('id', oldTx.destination_account_id).single()
+      if (oldDest) {
+        await supabase.from('accounts').update({ initial_balance: Number(oldDest.initial_balance) - Number(oldTx.amount) }).eq('id', oldTx.destination_account_id)
+      }
+    }
+  }
+
+  // 4. Apply New Balances
+  if (baseData.status === 'posted' && baseData.account_id) {
+    const { data: newAcc } = await supabase.from('accounts').select('initial_balance').eq('id', baseData.account_id).single()
+    if (newAcc) {
+      let newBalance = Number(newAcc.initial_balance)
+      if (baseData.type === 'income') newBalance += baseData.amount
+      if (baseData.type === 'expense' || baseData.type === 'transfer') newBalance -= baseData.amount
+      await supabase.from('accounts').update({ initial_balance: newBalance }).eq('id', baseData.account_id)
+    }
+
+    if (baseData.type === 'transfer' && baseData.destination_account_id) {
+      const { data: newDest } = await supabase.from('accounts').select('initial_balance').eq('id', baseData.destination_account_id).single()
+      if (newDest) {
+        await supabase.from('accounts').update({ initial_balance: Number(newDest.initial_balance) + baseData.amount }).eq('id', baseData.destination_account_id)
+      }
+    }
+  }
+
+  // 5. Update Transaction
+  const { error } = await supabase.from('transactions').update(baseData).eq('id', id)
+  if (error) return { error: 'Erro ao atualizar transação.' }
+
+  revalidatePath('/', 'layout')
+  return { success: 'Transação atualizada!' }
 }

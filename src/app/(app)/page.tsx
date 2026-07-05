@@ -19,9 +19,9 @@ export default async function Home() {
   let accounts: any[] = []
 
   if (currentWorkspace) {
-    // Buscar transações do mês atual
+    // Buscar transações dos últimos 6 meses até o último dia do mês atual
     const now = new Date()
-    const firstDay = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split('T')[0]
+    const firstDay = new Date(now.getFullYear(), now.getMonth() - 5, 1).toISOString().split('T')[0]
     const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0).toISOString().split('T')[0]
 
     const [txRes, catRes, accRes] = await Promise.all([

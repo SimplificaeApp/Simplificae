@@ -13,7 +13,6 @@ import {
   CalendarDays,
   Filter,
   PiggyBank,
-  LineChart,
   Settings2,
   Eye,
   EyeOff,
@@ -36,6 +35,10 @@ import {
   Cell,
   Legend,
   Sector,
+  BarChart,
+  Bar,
+  LineChart,
+  Line,
 } from "recharts";
 
 type Workspace = { id: string; name: string; type: string };
@@ -53,7 +56,7 @@ type Transaction = {
 };
 type Category = { id: string; name: string; type: string; icon?: string; color?: string };
 type Vault = { id: string; name: string; target_amount: number | null; balance: number; icon?: string; color?: string; account_id: string }
-type Account = { id: string; name: string; initial_balance: number; icon?: string; color?: string; account_vaults?: Vault[] };
+type Account = { id: string; name: string; type: string; initial_balance: number; icon?: string; color?: string; account_vaults?: Vault[] };
 
 const currencyFmt = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
 
@@ -187,27 +190,58 @@ export function DashboardClient({
   }, [transactions, selectedAccount, selectedCategory]);
 
   const validCashflowTx = useMemo(() => {
-    return filteredTx.filter(t => !(t as any).ignore_in_cashflow && t.status === 'posted');
-  }, [filteredTx]);
+    return filteredTx.filter(t => {
+      if (t.ignore_in_cashflow) return false;
+      if (t.status !== 'posted') return false; 
+      
+      const account = accounts.find(a => a.id === t.account_id);
+      if (account?.type === 'credit_card') return false; 
+      
+      return true;
+    });
+  }, [filteredTx, accounts]);
 
-  // KPIs
+  // Isolate current month transactions for KPIs
+  const currentMonthTx = useMemo(() => {
+    const now = new Date()
+    const currentMonth = now.getMonth()
+    const currentYear = now.getFullYear()
+    
+    return validCashflowTx.filter(t => {
+      const txDate = new Date(t.date + 'T12:00:00')
+      return txDate.getMonth() === currentMonth && txDate.getFullYear() === currentYear
+    })
+  }, [validCashflowTx])
+
+  // KPIs (Only Current Month)
   const totalIncomes = useMemo(
-    () => validCashflowTx.filter((t) => t.type === "income").reduce((acc, t) => acc + Number(t.amount), 0),
-    [validCashflowTx]
+    () => currentMonthTx.filter((t) => t.type === "income").reduce((acc, t) => acc + Number(t.amount), 0),
+    [currentMonthTx]
   );
+  
+  // O pagamento da fatura do cartão é uma transferência de checking -> credit_card
+  // Deve contar como despesa no dashboard (Only Current Month)
   const totalExpenses = useMemo(
-    () => validCashflowTx.filter((t) => t.type === "expense").reduce((acc, t) => acc + Number(t.amount), 0),
-    [validCashflowTx]
+    () => currentMonthTx.filter((t) => {
+      if (t.type === "expense") return true;
+      if (t.type === "transfer") {
+        const destAcc = accounts.find(a => a.id === (t as any).destination_account_id);
+        if (destAcc?.type === 'credit_card') return true;
+      }
+      return false;
+    }).reduce((acc, t) => acc + Number(t.amount), 0),
+    [currentMonthTx, accounts]
   );
   const availableBalance = useMemo(
     () => {
       if (selectedAccount !== "all") {
         const acc = accounts.find(a => a.id === selectedAccount);
-        if (!acc) return 0;
+        if (!acc || acc.type === 'credit_card') return 0;
         if ((acc as any).is_hidden && !isUnlocked) return 0;
         return Number(acc.initial_balance);
       }
       return accounts.reduce((acc, a) => {
+        if (a.type === 'credit_card') return acc;
         if ((a as any).is_hidden && !isUnlocked) return acc;
         return acc + Number(a.initial_balance);
       }, 0);
@@ -236,7 +270,7 @@ export function DashboardClient({
 
   const accountDistributionData = useMemo(() => {
     return accounts
-      .filter(a => Number(a.initial_balance) > 0)
+      .filter(a => a.type !== 'credit_card' && Number(a.initial_balance) > 0)
       .map(a => ({
         name: a.name,
         value: Number(a.initial_balance),
@@ -251,10 +285,14 @@ export function DashboardClient({
     const days: Record<number, { income: number; expense: number }> = {};
     for (let d = 1; d <= daysInMonth; d++) days[d] = { income: 0, expense: 0 };
 
-    validCashflowTx.forEach((t) => {
+    currentMonthTx.forEach((t) => {
       const day = new Date(t.date + "T12:00:00").getDate();
       if (t.type === "income") days[day].income += Number(t.amount);
       if (t.type === "expense") days[day].expense += Number(t.amount);
+      if (t.type === "transfer") {
+        const destAcc = accounts.find(a => a.id === (t as any).destination_account_id);
+        if (destAcc?.type === 'credit_card') days[day].expense += Number(t.amount);
+      }
     });
 
     return Object.entries(days).map(([day, v]) => ({
@@ -262,31 +300,102 @@ export function DashboardClient({
       Receitas: v.income,
       Despesas: v.expense,
     }));
-  }, [transactions]);
+  }, [currentMonthTx, accounts]);
 
-  // Donut data: top categories by expense amount
+  // Donut data: top categories by expense amount (Only Current Month)
   const donutData = useMemo(() => {
     const catMap = new Map<string, { name: string; value: number; color: string }>();
-    validCashflowTx
-      .filter((t) => t.type === "expense")
+    currentMonthTx
       .forEach((t) => {
-        const catName = t.category?.name || "Sem Categoria";
-        const catColor = t.category?.color || "#64748b";
-        const existing = catMap.get(catName);
-        if (existing) {
-          existing.value += Number(t.amount);
-        } else {
-          catMap.set(catName, { name: catName, value: Number(t.amount), color: catColor });
+        let isExpense = false;
+        let catName = t.category?.name || "Sem Categoria";
+        let catColor = t.category?.color || "#64748b";
+
+        if (t.type === "expense") {
+          isExpense = true;
+        } else if (t.type === "transfer") {
+          const destAcc = accounts.find(a => a.id === (t as any).destination_account_id);
+          if (destAcc?.type === 'credit_card') {
+            isExpense = true;
+            catName = "Fatura do Cartão";
+            catColor = destAcc.color || "#3b82f6";
+          }
+        }
+
+        if (isExpense) {
+          const existing = catMap.get(catName);
+          if (existing) {
+            existing.value += Number(t.amount);
+          } else {
+            catMap.set(catName, { name: catName, value: Number(t.amount), color: catColor });
+          }
         }
       });
     return Array.from(catMap.values())
       .sort((a, b) => b.value - a.value)
       .slice(0, 6);
-  }, [transactions]);
+  }, [currentMonthTx, accounts]);
 
-  // Recent 5 transactions (from filtered)
-  const recentTx = filteredTx.slice(0, 5);
-  const hasData = filteredTx.length > 0;
+  // Macro Bar Chart (Last 6 Months)
+  const macroBarData = useMemo(() => {
+    const now = new Date()
+    const data = []
+    
+    for (let i = -5; i <= 0; i++) {
+      const targetDate = new Date(now.getFullYear(), now.getMonth() + i, 1)
+      const targetMonth = targetDate.getMonth()
+      const targetYear = targetDate.getFullYear()
+      
+      let inc = 0
+      let exp = 0
+      
+      validCashflowTx.forEach(t => {
+        const txDate = new Date(t.date + 'T12:00:00')
+        if (txDate.getMonth() === targetMonth && txDate.getFullYear() === targetYear) {
+          if (t.type === 'income') inc += Number(t.amount)
+          if (t.type === 'expense') exp += Number(t.amount)
+          if (t.type === 'transfer') {
+            const destAcc = accounts.find(a => a.id === (t as any).destination_account_id)
+            if (destAcc?.type === 'credit_card') exp += Number(t.amount)
+          }
+        }
+      })
+      
+      const monthLabel = new Intl.DateTimeFormat('pt-BR', { month: 'short' }).format(targetDate)
+      data.push({
+        name: monthLabel.charAt(0).toUpperCase() + monthLabel.slice(1),
+        Receitas: inc,
+        Despesas: exp
+      })
+    }
+    return data
+  }, [validCashflowTx, accounts])
+
+  // Custom macro bar tooltip
+  const MacroBarTooltip = ({ active, payload, label }: any) => {
+    if (!active || !payload || !payload.length) return null
+    return (
+      <div className="bg-white/95 backdrop-blur-sm border border-slate-200 rounded-xl px-4 py-3 shadow-xl min-w-[160px]">
+        <p className="text-xs font-bold text-slate-500 mb-2">{label}</p>
+        <div className="flex justify-between items-center mb-1 gap-4">
+          <span className="text-xs font-medium text-slate-600">Receitas</span>
+          <span className="text-sm font-bold text-emerald-600">
+            {currencyFmt.format(payload[0]?.value || 0)}
+          </span>
+        </div>
+        <div className="flex justify-between items-center gap-4">
+          <span className="text-xs font-medium text-slate-600">Despesas</span>
+          <span className="text-sm font-bold text-rose-600">
+            {currencyFmt.format(payload[1]?.value || 0)}
+          </span>
+        </div>
+      </div>
+    )
+  }
+
+  // Recent 5 transactions (from currentMonthTx)
+  const recentTx = currentMonthTx.slice(0, 5);
+  const hasData = currentMonthTx.length > 0;
 
   const fadeUp = {
     initial: { opacity: 0, y: 16 },
@@ -431,48 +540,66 @@ export function DashboardClient({
           <motion.div
             {...fadeUp}
             transition={{ duration: 0.3, delay: 0.1 }}
-            className="glass-panel p-5 md:p-6 rounded-2xl group hover:shadow-lg hover:shadow-emerald-500/5 transition-all duration-300"
+            className="glass-panel p-5 md:p-6 rounded-2xl group hover:shadow-lg hover:shadow-emerald-500/5 transition-all duration-300 relative overflow-hidden"
           >
-            <div className="flex justify-between items-center mb-3">
-              <h3 className="text-sm font-semibold text-slate-500">Receitas</h3>
-              <div className="w-9 h-9 rounded-xl bg-emerald-50 flex items-center justify-center group-hover:bg-emerald-100 transition-colors">
-                <ArrowUpRight className="w-4 h-4 text-emerald-600" />
+            <div className="absolute inset-0 opacity-[0.03] group-hover:opacity-[0.06] transition-opacity pointer-events-none">
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={areaData}>
+                  <Line type="monotone" dataKey="Receitas" stroke="#10b981" strokeWidth={3} dot={false} isAnimationActive={false} />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+            <div className="relative z-10">
+              <div className="flex justify-between items-center mb-3">
+                <h3 className="text-sm font-semibold text-slate-500">Receitas</h3>
+                <div className="w-9 h-9 rounded-xl bg-emerald-50 flex items-center justify-center group-hover:bg-emerald-100 transition-colors">
+                  <ArrowUpRight className="w-4 h-4 text-emerald-600" />
+                </div>
               </div>
+              <div className="text-2xl xl:text-3xl font-black text-emerald-600 tabular-nums truncate">
+                {currencyFmt.format(totalIncomes)}
+              </div>
+              <p className="text-xs text-slate-400 mt-1">{MONTHS[new Date().getMonth()]}</p>
             </div>
-            <div className="text-2xl xl:text-3xl font-black text-emerald-600 tabular-nums truncate">
-              {currencyFmt.format(totalIncomes)}
-            </div>
-            <p className="text-xs text-slate-400 mt-1">{MONTHS[new Date().getMonth()]}</p>
           </motion.div>
 
           <motion.div
             {...fadeUp}
             transition={{ duration: 0.3, delay: 0.15 }}
-            className="glass-panel p-5 md:p-6 rounded-2xl group hover:shadow-lg hover:shadow-rose-500/5 transition-all duration-300"
+            className="glass-panel p-5 md:p-6 rounded-2xl group hover:shadow-lg hover:shadow-rose-500/5 transition-all duration-300 relative overflow-hidden"
           >
-            <div className="flex justify-between items-center mb-3">
-              <h3 className="text-sm font-semibold text-slate-500">Despesas</h3>
-              <div className="w-9 h-9 rounded-xl bg-rose-50 flex items-center justify-center group-hover:bg-rose-100 transition-colors">
-                <ArrowDownRight className="w-4 h-4 text-rose-600" />
+            <div className="absolute inset-0 opacity-[0.03] group-hover:opacity-[0.06] transition-opacity pointer-events-none">
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={areaData}>
+                  <Line type="monotone" dataKey="Despesas" stroke="#f43f5e" strokeWidth={3} dot={false} isAnimationActive={false} />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+            <div className="relative z-10">
+              <div className="flex justify-between items-center mb-3">
+                <h3 className="text-sm font-semibold text-slate-500">Despesas</h3>
+                <div className="w-9 h-9 rounded-xl bg-rose-50 flex items-center justify-center group-hover:bg-rose-100 transition-colors">
+                  <ArrowDownRight className="w-4 h-4 text-rose-600" />
+                </div>
               </div>
+              <div className="text-2xl xl:text-3xl font-black text-rose-600 tabular-nums truncate">
+                {currencyFmt.format(totalExpenses)}
+              </div>
+              <p className="text-xs text-slate-400 mt-1">{MONTHS[new Date().getMonth()]}</p>
             </div>
-            <div className="text-2xl xl:text-3xl font-black text-rose-600 tabular-nums truncate">
-              {currencyFmt.format(totalExpenses)}
-            </div>
-            <p className="text-xs text-slate-400 mt-1">{MONTHS[new Date().getMonth()]}</p>
           </motion.div>
         </div>
 
-        {/* Charts Row */}
+        {/* Charts Row 1: Area & Macro Bar */}
         {hasData && (
-          <div className="grid grid-cols-1 lg:grid-cols-5 gap-4 md:gap-6 mb-8">
+          <div className="grid grid-cols-1 lg:grid-cols-6 gap-4 md:gap-6 mb-8">
             {/* Area Chart */}
             <motion.div
               {...fadeUp}
               transition={{ duration: 0.4, delay: 0.2 }}
               className="lg:col-span-3 glass-panel rounded-2xl p-5 md:p-6"
             >
-              <h3 className="font-bold text-slate-800 mb-4">Fluxo de Caixa Diário</h3>
+              <h3 className="font-bold text-slate-800 mb-4">Fluxo Diário (Mês Atual)</h3>
               <div className="h-64 md:h-72">
                 <ResponsiveContainer width="100%" height="100%">
                   <AreaChart data={areaData} margin={{ top: 5, right: 5, left: -20, bottom: 0 }}>
@@ -502,7 +629,7 @@ export function DashboardClient({
                       tickLine={false}
                       tickFormatter={(v: number) => (v >= 1000 ? `${(v / 1000).toFixed(0)}k` : String(v))}
                     />
-                    <Tooltip content={<AreaChartTooltip />} />
+                    <Tooltip content={<AreaChartTooltip />} cursor={{ stroke: '#94a3b8', strokeWidth: 1, strokeDasharray: '4 4' }} />
                     <Area
                       type="monotone"
                       dataKey="Receitas"
@@ -522,13 +649,49 @@ export function DashboardClient({
               </div>
             </motion.div>
 
-            {/* Pie Chart Top Despesas */}
+            {/* Macro Bar Chart */}
             <motion.div
               {...fadeUp}
               transition={{ duration: 0.4, delay: 0.25 }}
+              className="lg:col-span-3 glass-panel rounded-2xl p-5 md:p-6"
+            >
+              <h3 className="font-bold text-slate-800 mb-4">Visão Geral (Últimos 6 Meses)</h3>
+              <div className="h-64 md:h-72">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={macroBarData} margin={{ top: 5, right: 5, left: -20, bottom: 0 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" vertical={false} />
+                    <XAxis
+                      dataKey="name"
+                      tick={{ fontSize: 11, fill: "#94a3b8" }}
+                      axisLine={false}
+                      tickLine={false}
+                    />
+                    <YAxis
+                      tick={{ fontSize: 11, fill: "#94a3b8" }}
+                      axisLine={false}
+                      tickLine={false}
+                      tickFormatter={(v: number) => (v >= 1000 ? `${(v / 1000).toFixed(0)}k` : String(v))}
+                    />
+                    <Tooltip content={<MacroBarTooltip />} cursor={{ fill: '#f1f5f9' }} />
+                    <Bar dataKey="Receitas" fill="#10b981" radius={[4, 4, 0, 0]} maxBarSize={40} />
+                    <Bar dataKey="Despesas" fill="#f43f5e" radius={[4, 4, 0, 0]} maxBarSize={40} />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            </motion.div>
+          </div>
+        )}
+
+        {/* Charts Row 2: Pies */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 md:gap-6 mb-8">
+          {/* Pie Chart Top Despesas */}
+          {hasData && (
+            <motion.div
+              {...fadeUp}
+              transition={{ duration: 0.4, delay: 0.3 }}
               className="glass-panel rounded-2xl p-5 md:p-6"
             >
-              <h3 className="font-bold text-slate-800 mb-4">Top Despesas</h3>
+              <h3 className="font-bold text-slate-800 mb-4">Top Despesas (Mês Atual)</h3>
               {donutData.length > 0 ? (
                 <div className="h-64 md:h-72">
                   <ResponsiveContainer width="100%" height="100%">
@@ -573,11 +736,8 @@ export function DashboardClient({
                 </div>
               )}
             </motion.div>
-          </div>
-        )}
+          )}
 
-        {/* Distribuição do Saldo - Independente de ter transações no mês */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 md:gap-6 mb-8">
           {/* Pie Chart Distribuição de Contas */}
           <motion.div
             {...fadeUp}
@@ -682,7 +842,7 @@ export function DashboardClient({
                       <div>
                         <div className="font-semibold text-slate-800 text-sm">{t.description}</div>
                         <div className="text-xs text-slate-400 font-medium">
-                          {t.category?.name || (isTransfer ? "Transferência" : "")}{" "}
+                          {t.category?.name || (isTransfer ? "Pagamento de Fatura" : "")}{" "}
                           · {new Date(t.date + "T12:00:00").toLocaleDateString("pt-BR")}
                         </div>
                       </div>
