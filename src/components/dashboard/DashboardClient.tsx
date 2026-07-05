@@ -9,37 +9,27 @@ import {
   TrendingUp,
   TrendingDown,
   ArrowRightLeft,
-  ChevronRight,
   CalendarDays,
-  Filter,
   PiggyBank,
   Settings2,
   Eye,
   EyeOff,
+  BarChart3,
 } from "lucide-react";
 import { usePrivacy } from "@/components/providers/PrivacyProvider";
-import { useState, useMemo } from "react";
+import { useState, useMemo, useCallback } from "react";
 import { Modal } from "@/components/ui/Modal";
 import { TransactionForm } from "@/components/transactions/TransactionForm";
 import { Lock } from "lucide-react";
+import dynamic from "next/dynamic";
 import {
-  AreaChart,
-  Area,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
   ResponsiveContainer,
-  PieChart,
-  Pie,
-  Cell,
-  Legend,
-  Sector,
-  BarChart,
-  Bar,
   LineChart,
   Line,
 } from "recharts";
+
+// Lazy load ECharts to avoid large bundle impact on initial load
+const ReactECharts = dynamic(() => import("echarts-for-react"), { ssr: false, loading: () => <div className="h-full w-full bg-slate-50 rounded-xl animate-pulse" /> });
 
 type Workspace = { id: string; name: string; type: string };
 type Transaction = {
@@ -119,31 +109,6 @@ function DonutTooltip({ active, payload }: any) {
   );
 }
 
-// Active Shape for Pie to give a 3D hover effect
-const renderActiveShape = (props: any) => {
-  const { cx, cy, innerRadius, outerRadius, startAngle, endAngle, fill, payload, percent, value } = props;
-
-  return (
-    <g>
-      <text x={cx} y={cy - 10} dy={8} textAnchor="middle" fill="#334155" className="text-xs font-bold">
-        {payload.name.substring(0, 15)}{payload.name.length > 15 ? '...' : ''}
-      </text>
-      <text x={cx} y={cy + 10} dy={8} textAnchor="middle" fill="#64748b" className="text-[10px] font-semibold">
-        {(percent * 100).toFixed(1)}%
-      </text>
-      <Sector
-        cx={cx}
-        cy={cy}
-        innerRadius={innerRadius}
-        outerRadius={outerRadius + 8}
-        startAngle={startAngle}
-        endAngle={endAngle}
-        fill={fill}
-        style={{ filter: `drop-shadow(0px 10px 10px ${fill}60)` }}
-      />
-    </g>
-  );
-};
 
 export function DashboardClient({
   user,
@@ -177,9 +142,6 @@ export function DashboardClient({
       toggleGlobalBlur();
     }
   }
-
-  const [activeIndexExpense, setActiveIndexExpense] = useState<number>(-1);
-  const [activeIndexDist, setActiveIndexDist] = useState<number>(-1);
 
   const filteredTx = useMemo(() => {
     return transactions.filter(t => {
@@ -336,61 +298,203 @@ export function DashboardClient({
       .slice(0, 6);
   }, [currentMonthTx, accounts]);
 
-  // Macro Bar Chart (Last 6 Months)
+  // Macro Bar Chart (Last 6 Months) — must come before ECharts options
   const macroBarData = useMemo(() => {
     const now = new Date()
     const data = []
-    
     for (let i = -5; i <= 0; i++) {
       const targetDate = new Date(now.getFullYear(), now.getMonth() + i, 1)
       const targetMonth = targetDate.getMonth()
       const targetYear = targetDate.getFullYear()
-      
-      let inc = 0
-      let exp = 0
-      
+      let inc = 0, exp = 0
       validCashflowTx.forEach(t => {
         const txDate = new Date(t.date + 'T12:00:00')
         if (txDate.getMonth() === targetMonth && txDate.getFullYear() === targetYear) {
           if (t.type === 'income') inc += Number(t.amount)
           if (t.type === 'expense') exp += Number(t.amount)
           if (t.type === 'transfer') {
-            const destAcc = accounts.find(a => a.id === (t as any).destination_account_id)
+            const destAcc = accounts.find((a: any) => a.id === (t as any).destination_account_id)
             if (destAcc?.type === 'credit_card') exp += Number(t.amount)
           }
         }
       })
-      
       const monthLabel = new Intl.DateTimeFormat('pt-BR', { month: 'short' }).format(targetDate)
-      data.push({
-        name: monthLabel.charAt(0).toUpperCase() + monthLabel.slice(1),
-        Receitas: inc,
-        Despesas: exp
-      })
+      data.push({ name: monthLabel.charAt(0).toUpperCase() + monthLabel.slice(1), Receitas: inc, Despesas: exp })
     }
     return data
   }, [validCashflowTx, accounts])
 
-  // Custom macro bar tooltip
+  // ECharts options — Area Chart (Fluxo Diário)
+  const areaChartOption = useMemo(() => ({
+    grid: { top: 16, right: 16, bottom: 24, left: 54, containLabel: false },
+    tooltip: {
+      trigger: 'axis',
+      backgroundColor: 'rgba(255,255,255,0.97)',
+      borderColor: '#e2e8f0',
+      borderWidth: 1,
+      borderRadius: 12,
+      padding: [10, 14],
+      textStyle: { color: '#334155', fontSize: 12, fontFamily: 'inherit' },
+      formatter: (params: any[]) => {
+        const income = params.find((p: any) => p.seriesName === 'Receitas')?.value || 0
+        const expense = params.find((p: any) => p.seriesName === 'Despesas')?.value || 0
+        const result = income - expense
+        const fmt = (v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
+        return `<div style="font-size:11px;font-weight:700;color:#64748b;margin-bottom:6px">Dia ${params[0].axisValue}</div>` +
+          `<div style="display:flex;justify-content:space-between;gap:16px;margin-bottom:4px"><span style="color:#64748b">Receitas</span><span style="color:#10b981;font-weight:800">${fmt(income)}</span></div>` +
+          `<div style="display:flex;justify-content:space-between;gap:16px;margin-bottom:8px"><span style="color:#64748b">Despesas</span><span style="color:#f43f5e;font-weight:800">${fmt(expense)}</span></div>` +
+          `<div style="border-top:1px solid #f1f5f9;padding-top:8px;display:flex;justify-content:space-between;gap:16px"><span style="color:#64748b">Resultado</span><span style="color:${result >= 0 ? '#10b981' : '#f43f5e'};font-weight:900">${result >= 0 ? '+' : ''}${fmt(result)}</span></div>`
+      }
+    },
+    legend: { show: false },
+    xAxis: { type: 'category', data: areaData.map(d => d.day), axisLine: { show: false }, axisTick: { show: false }, axisLabel: { color: '#94a3b8', fontSize: 11, fontFamily: 'inherit' }, splitLine: { show: false } },
+    yAxis: { type: 'value', axisLine: { show: false }, axisTick: { show: false }, axisLabel: { color: '#94a3b8', fontSize: 11, fontFamily: 'inherit', formatter: (v: number) => v >= 1000 ? `${(v / 1000).toFixed(0)}k` : String(v) }, splitLine: { lineStyle: { color: '#f1f5f9', type: 'dashed' } } },
+    series: [
+      {
+        name: 'Receitas', type: 'line', data: areaData.map(d => d.Receitas),
+        smooth: true, symbol: 'none', lineStyle: { color: '#10b981', width: 2.5 },
+        areaStyle: { color: { type: 'linear', x: 0, y: 0, x2: 0, y2: 1, colorStops: [{ offset: 0, color: 'rgba(16,185,129,0.28)' }, { offset: 1, color: 'rgba(16,185,129,0)' }] } },
+        animationDuration: 1200, animationEasing: 'cubicOut'
+      },
+      {
+        name: 'Despesas', type: 'line', data: areaData.map(d => d.Despesas),
+        smooth: true, symbol: 'none', lineStyle: { color: '#f43f5e', width: 2.5 },
+        areaStyle: { color: { type: 'linear', x: 0, y: 0, x2: 0, y2: 1, colorStops: [{ offset: 0, color: 'rgba(244,63,94,0.18)' }, { offset: 1, color: 'rgba(244,63,94,0)' }] } },
+        animationDuration: 1400, animationEasing: 'cubicOut'
+      }
+    ]
+  }), [areaData])
+
+  // ECharts options — Macro Bar Chart (6 meses)
+  const macroBarOption = useMemo(() => ({
+    grid: { top: 16, right: 16, bottom: 24, left: 54, containLabel: false },
+    tooltip: {
+      trigger: 'axis',
+      backgroundColor: 'rgba(255,255,255,0.97)',
+      borderColor: '#e2e8f0',
+      borderWidth: 1,
+      borderRadius: 12,
+      padding: [10, 14],
+      textStyle: { color: '#334155', fontSize: 12, fontFamily: 'inherit' },
+      formatter: (params: any[]) => {
+        const inc = params.find((p: any) => p.seriesName === 'Receitas')?.value || 0
+        const exp = params.find((p: any) => p.seriesName === 'Despesas')?.value || 0
+        const result = inc - exp
+        const fmt = (v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
+        return `<div style="font-size:11px;font-weight:700;color:#64748b;margin-bottom:6px">${params[0].axisValue}</div>` +
+          `<div style="display:flex;justify-content:space-between;gap:16px;margin-bottom:4px"><span style="color:#64748b">Receitas</span><span style="color:#10b981;font-weight:800">${fmt(inc)}</span></div>` +
+          `<div style="display:flex;justify-content:space-between;gap:16px;margin-bottom:8px"><span style="color:#64748b">Despesas</span><span style="color:#f43f5e;font-weight:800">${fmt(exp)}</span></div>` +
+          `<div style="border-top:1px solid #f1f5f9;padding-top:8px;display:flex;justify-content:space-between;gap:16px"><span style="color:#64748b">Líquido</span><span style="color:${result >= 0 ? '#10b981' : '#f43f5e'};font-weight:900">${result >= 0 ? '+' : ''}${fmt(result)}</span></div>`
+      }
+    },
+    legend: { bottom: 0, textStyle: { color: '#64748b', fontSize: 11, fontFamily: 'inherit' }, icon: 'roundRect', itemWidth: 10, itemHeight: 10, itemGap: 20 },
+    xAxis: { type: 'category', data: macroBarData.map(d => d.name), axisLine: { show: false }, axisTick: { show: false }, axisLabel: { color: '#94a3b8', fontSize: 11, fontFamily: 'inherit' }, splitLine: { show: false } },
+    yAxis: { type: 'value', axisLine: { show: false }, axisTick: { show: false }, axisLabel: { color: '#94a3b8', fontSize: 11, fontFamily: 'inherit', formatter: (v: number) => v >= 1000 ? `${(v / 1000).toFixed(0)}k` : String(v) }, splitLine: { lineStyle: { color: '#f1f5f9', type: 'dashed' } } },
+    series: [
+      { name: 'Receitas', type: 'bar', data: macroBarData.map(d => d.Receitas), itemStyle: { color: { type: 'linear', x: 0, y: 0, x2: 0, y2: 1, colorStops: [{ offset: 0, color: '#10b981' }, { offset: 1, color: '#34d399' }] }, borderRadius: [6, 6, 0, 0] }, barMaxWidth: 36, animationDuration: 1000, animationEasing: 'elasticOut' },
+      { name: 'Despesas', type: 'bar', data: macroBarData.map(d => d.Despesas), itemStyle: { color: { type: 'linear', x: 0, y: 0, x2: 0, y2: 1, colorStops: [{ offset: 0, color: '#f43f5e' }, { offset: 1, color: '#fb7185' }] }, borderRadius: [6, 6, 0, 0] }, barMaxWidth: 36, animationDuration: 1200, animationEasing: 'elasticOut' },
+    ]
+  }), [macroBarData])
+
+  // ECharts options — Donut Despesas
+  const donutExpenseOption = useMemo(() => ({
+    tooltip: {
+      trigger: 'item',
+      backgroundColor: 'rgba(255,255,255,0.97)',
+      borderColor: '#e2e8f0',
+      borderWidth: 1,
+      borderRadius: 12,
+      padding: [10, 14],
+      textStyle: { color: '#334155', fontSize: 12, fontFamily: 'inherit' },
+      formatter: (p: any) => {
+        const fmt = (v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
+        return `<div style="display:flex;align-items:center;gap:8px;margin-bottom:4px"><span style="width:10px;height:10px;border-radius:50%;background:${p.color};display:inline-block"></span><span style="font-weight:700;color:#334155">${p.name}</span></div>` +
+          `<div style="font-size:15px;font-weight:900;color:#0f172a">${fmt(p.value)}</div>` +
+          `<div style="font-size:10px;color:#94a3b8;margin-top:2px">${p.percent.toFixed(1)}% do total</div>`
+      }
+    },
+    legend: { type: 'scroll', orient: 'horizontal', bottom: 0, textStyle: { color: '#64748b', fontSize: 11, fontFamily: 'inherit' }, icon: 'circle', itemWidth: 8, itemHeight: 8 },
+    series: [{
+      type: 'pie', radius: ['48%', '72%'], center: ['50%', '44%'],
+      padAngle: 4, itemStyle: { borderRadius: 6 },
+      label: { show: false },
+      emphasis: { scale: true, scaleSize: 8, itemStyle: { shadowBlur: 16, shadowOffsetY: 6, shadowColor: 'rgba(0,0,0,0.15)' } },
+      data: donutData.map((d, i) => ({ name: d.name, value: d.value, itemStyle: { color: d.color || DONUT_COLORS[i % DONUT_COLORS.length] } })),
+      animationType: 'expansion', animationDuration: 1000, animationEasing: 'cubicOut'
+    }]
+  }), [donutData])
+
+  // ECharts options — Donut Distribuição
+  const donutDistOption = useMemo(() => ({
+    tooltip: {
+      trigger: 'item',
+      backgroundColor: 'rgba(255,255,255,0.97)',
+      borderColor: '#e2e8f0',
+      borderWidth: 1,
+      borderRadius: 12,
+      padding: [10, 14],
+      textStyle: { color: '#334155', fontSize: 12, fontFamily: 'inherit' },
+      formatter: (p: any) => {
+        const fmt = (v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
+        return `<div style="display:flex;align-items:center;gap:8px;margin-bottom:4px"><span style="width:10px;height:10px;border-radius:50%;background:${p.color};display:inline-block"></span><span style="font-weight:700;color:#334155">${p.name}</span></div>` +
+          `<div style="font-size:15px;font-weight:900;color:#0f172a">${fmt(p.value)}</div>` +
+          `<div style="font-size:10px;color:#94a3b8;margin-top:2px">${p.percent.toFixed(1)}% do total</div>`
+      }
+    },
+    legend: { type: 'scroll', orient: 'horizontal', bottom: 0, textStyle: { color: '#64748b', fontSize: 11, fontFamily: 'inherit' }, icon: 'circle', itemWidth: 8, itemHeight: 8 },
+    series: [{
+      type: 'pie', radius: ['48%', '72%'], center: ['50%', '44%'],
+      padAngle: 4, itemStyle: { borderRadius: 6 },
+      label: { show: false },
+      emphasis: { scale: true, scaleSize: 8, itemStyle: { shadowBlur: 16, shadowOffsetY: 6, shadowColor: 'rgba(0,0,0,0.15)' } },
+      data: accountDistributionData.map((d, i) => ({ name: d.name, value: d.value, itemStyle: { color: d.color || DONUT_COLORS[i % DONUT_COLORS.length] } })),
+      animationType: 'expansion', animationDuration: 1000, animationEasing: 'cubicOut'
+    }]
+  }), [accountDistributionData])
+
+  // ECharts — Gauge de Saúde Financeira
+  const spendingRate = totalIncomes > 0 ? Math.min(100, Math.round((totalExpenses / totalIncomes) * 100)) : 0
+  const gaugeColor = spendingRate < 70 ? '#10b981' : spendingRate < 90 ? '#f59e0b' : '#f43f5e'
+  const gaugeOption = useMemo(() => ({
+    series: [{
+      type: 'gauge',
+      startAngle: 220, endAngle: -40,
+      min: 0, max: 100,
+      radius: '88%',
+      center: ['50%', '58%'],
+      progress: { show: true, width: 14, roundCap: true, itemStyle: { color: gaugeColor } },
+      axisLine: { lineStyle: { width: 14, color: [[1, '#f1f5f9']] } },
+      axisTick: { show: false },
+      splitLine: { show: false },
+      axisLabel: { show: false },
+      pointer: { show: false },
+      anchor: { show: false },
+      detail: {
+        show: true,
+        offsetCenter: [0, '10%'],
+        fontSize: 24,
+        fontWeight: 900,
+        color: gaugeColor,
+        fontFamily: 'inherit',
+        formatter: `${spendingRate}%`
+      },
+      title: {
+        show: true,
+        offsetCenter: [0, '40%'],
+        fontSize: 11,
+        color: '#94a3b8',
+        fontFamily: 'inherit',
+        fontWeight: 600
+      },
+      data: [{ value: spendingRate, name: 'do orçamento' }],
+      animationDuration: 1500, animationEasing: 'cubicOut'
+    }]
+  }), [spendingRate, gaugeColor])
+
+  // Custom macro bar tooltip (legacy, kept for reference)
   const MacroBarTooltip = ({ active, payload, label }: any) => {
     if (!active || !payload || !payload.length) return null
-    return (
-      <div className="bg-white/95 backdrop-blur-sm border border-slate-200 rounded-xl px-4 py-3 shadow-xl min-w-[160px]">
-        <p className="text-xs font-bold text-slate-500 mb-2">{label}</p>
-        <div className="flex justify-between items-center mb-1 gap-4">
-          <span className="text-xs font-medium text-slate-600">Receitas</span>
-          <span className="text-sm font-bold text-emerald-600">
-            {currencyFmt.format(payload[0]?.value || 0)}
-          </span>
-        </div>
-        <div className="flex justify-between items-center gap-4">
-          <span className="text-xs font-medium text-slate-600">Despesas</span>
-          <span className="text-sm font-bold text-rose-600">
-            {currencyFmt.format(payload[1]?.value || 0)}
-          </span>
-        </div>
-      </div>
-    )
+    return null
   }
 
   // Recent 5 transactions (from currentMonthTx)
@@ -590,207 +694,105 @@ export function DashboardClient({
           </motion.div>
         </div>
 
-        {/* Charts Row 1: Area & Macro Bar */}
+        {/* Charts Row 1: Area & Macro Bar — ECharts */}
         {hasData && (
           <div className="grid grid-cols-1 lg:grid-cols-6 gap-4 md:gap-6 mb-8">
             {/* Area Chart */}
             <motion.div
               {...fadeUp}
               transition={{ duration: 0.4, delay: 0.2 }}
-              className="lg:col-span-3 glass-panel rounded-2xl p-5 md:p-6"
+              className="lg:col-span-4 glass-panel rounded-2xl p-5 md:p-6"
             >
-              <h3 className="font-bold text-slate-800 mb-4">Fluxo Diário (Mês Atual)</h3>
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="font-bold text-slate-800">Fluxo Diário <span className="text-slate-400 font-medium text-sm">({MONTHS[new Date().getMonth()]})</span></h3>
+                <div className="flex items-center gap-3 text-xs">
+                  <span className="flex items-center gap-1.5 text-emerald-600 font-semibold"><span className="w-2 h-2 rounded-full bg-emerald-500 inline-block" />Receitas</span>
+                  <span className="flex items-center gap-1.5 text-rose-500 font-semibold"><span className="w-2 h-2 rounded-full bg-rose-500 inline-block" />Despesas</span>
+                </div>
+              </div>
               <div className="h-64 md:h-72">
-                <ResponsiveContainer width="100%" height="100%">
-                  <AreaChart data={areaData} margin={{ top: 5, right: 5, left: -20, bottom: 0 }}>
-                    <defs>
-                      <linearGradient id="gradIncome" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="5%" stopColor="#10b981" stopOpacity={0.4} />
-                        <stop offset="95%" stopColor="#10b981" stopOpacity={0} />
-                      </linearGradient>
-                      <linearGradient id="gradExpense" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="5%" stopColor="#f43f5e" stopOpacity={0.4} />
-                        <stop offset="95%" stopColor="#f43f5e" stopOpacity={0} />
-                      </linearGradient>
-                      <filter id="shadowArea" x="-20%" y="-20%" width="140%" height="140%">
-                        <feDropShadow dx="0" dy="10" stdDeviation="10" floodColor="#10b981" floodOpacity="0.1" />
-                      </filter>
-                    </defs>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" vertical={false} />
-                    <XAxis
-                      dataKey="day"
-                      tick={{ fontSize: 11, fill: "#94a3b8" }}
-                      axisLine={false}
-                      tickLine={false}
-                    />
-                    <YAxis
-                      tick={{ fontSize: 11, fill: "#94a3b8" }}
-                      axisLine={false}
-                      tickLine={false}
-                      tickFormatter={(v: number) => (v >= 1000 ? `${(v / 1000).toFixed(0)}k` : String(v))}
-                    />
-                    <Tooltip content={<AreaChartTooltip />} cursor={{ stroke: '#94a3b8', strokeWidth: 1, strokeDasharray: '4 4' }} />
-                    <Area
-                      type="monotone"
-                      dataKey="Receitas"
-                      stroke="#10b981"
-                      strokeWidth={2.5}
-                      fill="url(#gradIncome)"
-                    />
-                    <Area
-                      type="monotone"
-                      dataKey="Despesas"
-                      stroke="#f43f5e"
-                      strokeWidth={2.5}
-                      fill="url(#gradExpense)"
-                    />
-                  </AreaChart>
-                </ResponsiveContainer>
+                <ReactECharts option={areaChartOption} style={{ height: '100%', width: '100%' }} />
               </div>
             </motion.div>
 
-            {/* Macro Bar Chart */}
+            {/* Gauge */}
             <motion.div
               {...fadeUp}
               transition={{ duration: 0.4, delay: 0.25 }}
-              className="lg:col-span-3 glass-panel rounded-2xl p-5 md:p-6"
+              className="lg:col-span-2 glass-panel rounded-2xl p-5 md:p-6 flex flex-col"
             >
-              <h3 className="font-bold text-slate-800 mb-4">Visão Geral (Últimos 6 Meses)</h3>
+              <h3 className="font-bold text-slate-800 mb-1">Saúde Financeira</h3>
+              <p className="text-xs text-slate-400 mb-2">% despesas vs receitas</p>
+              <div className="flex-1 min-h-0 h-48 md:h-full">
+                <ReactECharts option={gaugeOption} style={{ height: '100%', width: '100%' }} />
+              </div>
+              <p className={`text-center text-xs font-bold mt-1 ${
+                spendingRate < 70 ? 'text-emerald-600' : spendingRate < 90 ? 'text-amber-500' : 'text-rose-600'
+              }`}>
+                {spendingRate < 70 ? '✅ Dentro do orçamento' : spendingRate < 90 ? '⚠️ Atenção aos gastos' : '🚨 Gastos elevados'}
+              </p>
+            </motion.div>
+          </div>
+        )}
+
+        {/* Macro Bar Chart */}
+        {hasData && (
+          <div className="mb-8">
+            <motion.div
+              {...fadeUp}
+              transition={{ duration: 0.4, delay: 0.28 }}
+              className="glass-panel rounded-2xl p-5 md:p-6"
+            >
+              <h3 className="font-bold text-slate-800 mb-4">Visão Geral <span className="text-slate-400 font-medium text-sm">(Últimos 6 Meses)</span></h3>
               <div className="h-64 md:h-72">
-                <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={macroBarData} margin={{ top: 5, right: 5, left: -20, bottom: 0 }}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" vertical={false} />
-                    <XAxis
-                      dataKey="name"
-                      tick={{ fontSize: 11, fill: "#94a3b8" }}
-                      axisLine={false}
-                      tickLine={false}
-                    />
-                    <YAxis
-                      tick={{ fontSize: 11, fill: "#94a3b8" }}
-                      axisLine={false}
-                      tickLine={false}
-                      tickFormatter={(v: number) => (v >= 1000 ? `${(v / 1000).toFixed(0)}k` : String(v))}
-                    />
-                    <Tooltip content={<MacroBarTooltip />} cursor={{ fill: '#f1f5f9' }} />
-                    <Bar dataKey="Receitas" fill="#10b981" radius={[4, 4, 0, 0]} maxBarSize={40} />
-                    <Bar dataKey="Despesas" fill="#f43f5e" radius={[4, 4, 0, 0]} maxBarSize={40} />
-                  </BarChart>
-                </ResponsiveContainer>
+                <ReactECharts option={macroBarOption} style={{ height: '100%', width: '100%' }} />
               </div>
             </motion.div>
           </div>
         )}
 
-        {/* Charts Row 2: Pies */}
+        {/* Charts Row 2: Donuts */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 md:gap-6 mb-8">
-          {/* Pie Chart Top Despesas */}
+          {/* Donut Despesas */}
           {hasData && (
             <motion.div
               {...fadeUp}
               transition={{ duration: 0.4, delay: 0.3 }}
               className="glass-panel rounded-2xl p-5 md:p-6"
             >
-              <h3 className="font-bold text-slate-800 mb-4">Top Despesas (Mês Atual)</h3>
+              <h3 className="font-bold text-slate-800 mb-4">Top Despesas <span className="text-slate-400 font-medium text-sm">(Mês Atual)</span></h3>
               {donutData.length > 0 ? (
                 <div className="h-64 md:h-72">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <PieChart>
-                      <Pie
-                        {...{
-                          activeIndex: activeIndexExpense === -1 ? undefined : activeIndexExpense,
-                          activeShape: renderActiveShape as any
-                        }}
-                        onMouseEnter={(_, index) => setActiveIndexExpense(index)}
-                        onMouseLeave={() => setActiveIndexExpense(-1)}
-                        data={donutData}
-                        cx="50%"
-                        cy="45%"
-                        innerRadius={60}
-                        outerRadius={85}
-                        paddingAngle={5}
-                        dataKey="value"
-                        nameKey="name"
-                        strokeWidth={0}
-                        cornerRadius={4}
-                      >
-                        {donutData.map((entry, index) => (
-                          <Cell
-                            key={`cell-${index}`}
-                            fill={entry.color || DONUT_COLORS[index % DONUT_COLORS.length]}
-                          />
-                        ))}
-                      </Pie>
-                      <Tooltip content={<DonutTooltip />} />
-                      <Legend
-                        wrapperStyle={{ fontSize: "12px" }}
-                        iconType="circle"
-                        iconSize={8}
-                      />
-                    </PieChart>
-                  </ResponsiveContainer>
+                  <ReactECharts option={donutExpenseOption} style={{ height: '100%', width: '100%' }} />
                 </div>
               ) : (
-                <div className="h-64 flex items-center justify-center text-slate-400 text-sm">
-                  Nenhuma despesa registrada no mês.
+                <div className="h-64 flex flex-col items-center justify-center gap-2 text-slate-400">
+                  <BarChart3 className="w-10 h-10 text-slate-200" />
+                  <p className="text-sm">Nenhuma despesa no mês atual</p>
                 </div>
               )}
             </motion.div>
           )}
 
-          {/* Pie Chart Distribuição de Contas */}
+          {/* Donut Distribuição de Contas */}
           <motion.div
             {...fadeUp}
-            transition={{ duration: 0.4, delay: 0.28 }}
-            className="glass-panel rounded-2xl p-5 md:p-6 lg:col-span-1"
+            transition={{ duration: 0.4, delay: 0.32 }}
+            className="glass-panel rounded-2xl p-5 md:p-6"
           >
-            <h3 className="font-bold text-slate-800 mb-4">Distribuição do Saldo (Todas as contas)</h3>
+            <h3 className="font-bold text-slate-800 mb-4">Distribuição do Saldo</h3>
             {accountDistributionData.length > 0 ? (
               <div className="h-64 md:h-72">
-                <ResponsiveContainer width="100%" height="100%">
-                  <PieChart>
-                    <Pie
-                      {...{
-                        activeIndex: activeIndexDist === -1 ? undefined : activeIndexDist,
-                        activeShape: renderActiveShape as any
-                      }}
-                      onMouseEnter={(_, index) => setActiveIndexDist(index)}
-                      onMouseLeave={() => setActiveIndexDist(-1)}
-                      data={accountDistributionData}
-                      cx="50%"
-                      cy="45%"
-                      innerRadius={60}
-                      outerRadius={85}
-                      paddingAngle={5}
-                      dataKey="value"
-                      nameKey="name"
-                      strokeWidth={0}
-                      cornerRadius={4}
-                    >
-                      {accountDistributionData.map((entry, index) => (
-                        <Cell
-                          key={`cell-${index}`}
-                          fill={entry.color || DONUT_COLORS[index % DONUT_COLORS.length]}
-                        />
-                      ))}
-                    </Pie>
-                    <Tooltip content={<DonutTooltip />} />
-                    <Legend
-                      wrapperStyle={{ fontSize: "12px" }}
-                      iconType="circle"
-                      iconSize={8}
-                    />
-                  </PieChart>
-                </ResponsiveContainer>
+                <ReactECharts option={donutDistOption} style={{ height: '100%', width: '100%' }} />
               </div>
             ) : (
-              <div className="h-64 flex items-center justify-center text-slate-400 text-sm">
-                Nenhuma conta com saldo positivo.
+              <div className="h-64 flex flex-col items-center justify-center gap-2 text-slate-400">
+                <Wallet className="w-10 h-10 text-slate-200" />
+                <p className="text-sm">Nenhuma conta com saldo positivo</p>
               </div>
             )}
           </motion.div>
         </div>
-
 
 
         {/* Recent Transactions */}
