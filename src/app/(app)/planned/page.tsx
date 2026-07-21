@@ -13,7 +13,7 @@ export default async function PlannedPage() {
 
   const { data: workspaces } = await supabase
     .from('workspaces')
-    .select('id, name, type')
+    .select('id, name, type, month_turnover_day')
     .order('created_at', { ascending: true })
 
   const currentWorkspace = workspaces && workspaces.length > 0 ? workspaces[0] : null
@@ -25,14 +25,14 @@ export default async function PlannedPage() {
     const [txRes, catRes, accRes] = await Promise.all([
       supabase
         .from('transactions')
-        .select('*, category:categories(id, name, icon, color), account:accounts!transactions_account_id_fkey(id, name, color, icon)')
+        .select('*, category:categories(*), account:accounts!transactions_account_id_fkey(id, name, color, icon)')
         .eq('workspace_id', currentWorkspace.id)
-        .in('status', ['pending', 'paid_planned'])
         .order('date', { ascending: true }),
       supabase
         .from('categories')
         .select('*')
-        .eq('workspace_id', currentWorkspace.id),
+        .eq('workspace_id', currentWorkspace.id)
+        .order('name', { ascending: true }),
       supabase
         .from('accounts')
         .select('*')
@@ -51,6 +51,8 @@ export default async function PlannedPage() {
       categories={categories}
       accounts={accounts}
       workspaces={workspaces || []}
+      workspace={currentWorkspace}
     />
   )
 }
+

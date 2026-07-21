@@ -1,41 +1,70 @@
 'use client'
 
 import { useState, useTransition } from 'react'
-import { Wallet, Tags, Plus, Trash2 } from 'lucide-react'
+import { Wallet, Tags, Plus, Trash2, Edit2, CalendarDays } from 'lucide-react'
 import { Modal } from '@/components/ui/Modal'
 
 import { CategoryForm } from './CategoryForm'
 import { motion } from 'framer-motion'
-import { deleteAccount } from '@/app/actions/accounts'
 import { deleteCategory } from '@/app/actions/categories'
-import { updatePrivacyPin } from '@/app/actions/settings'
+import { updatePrivacyPin, updateWorkspaceTurnoverDay } from '@/app/actions/settings'
 import { toast } from 'sonner'
 
-type Category = { id: string; name: string; type: string; icon?: string; color?: string }
+type Category = { 
+  id: string
+  name: string
+  type: string
+  icon?: string
+  color?: string
+  budget_amount?: number
+  is_fixed?: boolean
+  is_investment?: boolean
+}
+
+const currencyFmt = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' })
 
 export function SettingsClient({
   workspaceId,
+  workspace,
   categories,
   initialPin
 }: {
   workspaceId?: string
+  workspace?: { id: string; name: string; type: string; month_turnover_day?: number } | null
   categories: Category[]
   initialPin?: string
 }) {
-  const [activeTab, setActiveTab] = useState<'categories' | 'privacy'>('categories')
+  const [activeTab, setActiveTab] = useState<'categories' | 'preferences' | 'privacy'>('categories')
   const [isModalOpen, setIsModalOpen] = useState(false)
+  const [editingCategory, setEditingCategory] = useState<Category | null>(null)
   const [isPending, startTransition] = useTransition()
   
   const [pin, setPin] = useState(initialPin || '')
+  const [turnoverDay, setTurnoverDay] = useState(workspace?.month_turnover_day || 1)
 
   const incomes = categories.filter(c => c.type === 'income')
-  const expenses = categories.filter(c => c.type === 'expense')
+  const expenses = categories.filter(c => c.type === 'expense' && !c.is_investment)
+  const investments = categories.filter(c => c.is_investment)
 
-
-  const handleDeleteCategory = (id: string) => {
+  const handleDeleteCategory = (id: string, e: React.MouseEvent) => {
+    e.stopPropagation()
     if (!confirm('Tem certeza? Isso pode falhar se existirem transações vinculadas à categoria.')) return
     startTransition(async () => {
       const res = await deleteCategory(id)
+      if (res?.error) toast.error(res.error)
+      else toast.success(res.success)
+    })
+  }
+
+  const handleEditCategory = (cat: Category) => {
+    setEditingCategory(cat)
+    setIsModalOpen(true)
+  }
+
+  const handleSaveTurnoverDay = () => {
+    if (!workspaceId) return
+    startTransition(async () => {
+      const res = await updateWorkspaceTurnoverDay(workspaceId, Number(turnoverDay))
       if (res?.error) toast.error(res.error)
       else toast.success(res.success)
     })
@@ -45,12 +74,17 @@ export function SettingsClient({
     <div className="flex flex-col gap-6">
       {/* Tabs */}
       <div className="flex border-b border-slate-200">
-
         <button
           onClick={() => setActiveTab('categories')}
           className={`flex items-center gap-2 px-6 py-3 font-semibold text-sm transition-colors border-b-2 ${activeTab === 'categories' ? 'border-emerald-500 text-emerald-700' : 'border-transparent text-slate-500 hover:text-slate-700'}`}
         >
-          <Tags className="w-4 h-4" /> Categorias
+          <Tags className="w-4 h-4" /> Categorias & Orçamento
+        </button>
+        <button
+          onClick={() => setActiveTab('preferences')}
+          className={`flex items-center gap-2 px-6 py-3 font-semibold text-sm transition-colors border-b-2 ${activeTab === 'preferences' ? 'border-emerald-500 text-emerald-700' : 'border-transparent text-slate-500 hover:text-slate-700'}`}
+        >
+          <CalendarDays className="w-4 h-4" /> Preferências do Mês
         </button>
         <button
           onClick={() => setActiveTab('privacy')}
@@ -73,11 +107,14 @@ export function SettingsClient({
       >
         <div className="flex justify-between items-center mb-6">
           <h2 className="text-lg font-bold text-slate-800">
-            {activeTab === 'categories' ? 'Minhas Categorias' : 'Privacidade e Segurança'}
+            {activeTab === 'categories' ? 'Minhas Categorias e Orçamentos' : activeTab === 'preferences' ? 'Ciclo e Virada do Mês' : 'Privacidade e Segurança'}
           </h2>
           {activeTab === 'categories' && (
             <button 
-              onClick={() => setIsModalOpen(true)}
+              onClick={() => {
+                setEditingCategory(null)
+                setIsModalOpen(true)
+              }}
               className="btn-primary py-2 px-4 flex items-center gap-2 text-sm"
             >
               <Plus className="w-4 h-4" />
@@ -88,47 +125,175 @@ export function SettingsClient({
 
         {activeTab === 'categories' && (
           <div className="flex flex-col gap-8">
+            {/* Receitas */}
             <div>
               <h3 className="font-bold text-slate-700 mb-4 flex items-center gap-2">
-                <span className="w-2 h-2 rounded-full bg-emerald-500"></span> Receitas
+                <span className="w-2 h-2 rounded-full bg-emerald-500"></span> Receitas (Entradas)
               </h3>
-              <div className="flex flex-wrap gap-2">
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
                 {incomes.map(cat => (
-                  <div key={cat.id} className="flex items-center gap-2 px-3 py-1.5 border border-slate-200 bg-white rounded-full text-sm font-medium text-slate-700 shadow-sm group">
-                    <span>{cat.icon || '💰'}</span>
-                    {cat.name}
-                    <button 
-                      onClick={() => handleDeleteCategory(cat.id)}
-                      disabled={isPending}
-                      className="w-0 overflow-hidden group-hover:w-4 text-slate-400 hover:text-rose-600 transition-all ml-1"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
+                  <div 
+                    key={cat.id} 
+                    onClick={() => handleEditCategory(cat)}
+                    className="flex items-center justify-between p-3 border border-slate-200 bg-white rounded-2xl text-sm font-medium text-slate-700 shadow-sm hover:border-emerald-500 hover:shadow-md transition-all cursor-pointer group"
+                  >
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <span className="text-xl">{cat.icon || '💰'}</span>
+                      <div className="truncate">
+                        <div className="font-bold text-slate-800 truncate">{cat.name}</div>
+                        {Boolean(cat.budget_amount) && (
+                          <div className="text-xs text-emerald-600 font-semibold">
+                            Meta: {currencyFmt.format(cat.budget_amount || 0)}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                      <button 
+                        onClick={(e) => { e.stopPropagation(); handleEditCategory(cat); }}
+                        className="p-1 text-slate-400 hover:text-slate-600"
+                        title="Editar"
+                      >
+                        <Edit2 className="w-4 h-4" />
+                      </button>
+                      <button 
+                        onClick={(e) => handleDeleteCategory(cat.id, e)}
+                        disabled={isPending}
+                        className="p-1 text-slate-400 hover:text-rose-600"
+                        title="Excluir"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
                   </div>
                 ))}
               </div>
             </div>
 
+            {/* Despesas */}
             <div>
               <h3 className="font-bold text-slate-700 mb-4 flex items-center gap-2">
-                <span className="w-2 h-2 rounded-full bg-rose-500"></span> Despesas
+                <span className="w-2 h-2 rounded-full bg-rose-500"></span> Despesas Gerais
               </h3>
-              <div className="flex flex-wrap gap-2">
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
                 {expenses.map(cat => (
-                  <div key={cat.id} className="flex items-center gap-2 px-3 py-1.5 border border-slate-200 bg-white rounded-full text-sm font-medium text-slate-700 shadow-sm group">
-                    <span>{cat.icon || '🏷️'}</span>
-                    {cat.name}
-                    <button 
-                      onClick={() => handleDeleteCategory(cat.id)}
-                      disabled={isPending}
-                      className="w-0 overflow-hidden group-hover:w-4 text-slate-400 hover:text-rose-600 transition-all ml-1"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
+                  <div 
+                    key={cat.id} 
+                    onClick={() => handleEditCategory(cat)}
+                    className="flex items-center justify-between p-3 border border-slate-200 bg-white rounded-2xl text-sm font-medium text-slate-700 shadow-sm hover:border-rose-400 hover:shadow-md transition-all cursor-pointer group"
+                  >
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <span className="text-xl">{cat.icon || '🏷️'}</span>
+                      <div className="truncate">
+                        <div className="flex items-center gap-1.5">
+                          <span className="font-bold text-slate-800 truncate">{cat.name}</span>
+                          {cat.is_fixed && (
+                            <span className="text-[10px] bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded font-bold uppercase shrink-0">Fixa</span>
+                          )}
+                        </div>
+                        <div className="text-xs text-slate-500 font-semibold">
+                          {cat.budget_amount ? `Teto: ${currencyFmt.format(cat.budget_amount)}` : 'Sem limite definido'}
+                        </div>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                      <button 
+                        onClick={(e) => { e.stopPropagation(); handleEditCategory(cat); }}
+                        className="p-1 text-slate-400 hover:text-slate-600"
+                        title="Editar"
+                      >
+                        <Edit2 className="w-4 h-4" />
+                      </button>
+                      <button 
+                        onClick={(e) => handleDeleteCategory(cat.id, e)}
+                        disabled={isPending}
+                        className="p-1 text-slate-400 hover:text-rose-600"
+                        title="Excluir"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
                   </div>
                 ))}
               </div>
             </div>
+
+            {/* Investimentos */}
+            <div>
+              <h3 className="font-bold text-slate-700 mb-4 flex items-center gap-2">
+                <span className="w-2 h-2 rounded-full bg-purple-500"></span> Investimentos & Aportes
+              </h3>
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
+                {investments.length > 0 ? (
+                  investments.map(cat => (
+                    <div 
+                      key={cat.id} 
+                      onClick={() => handleEditCategory(cat)}
+                      className="flex items-center justify-between p-3 border border-purple-200 bg-purple-50/30 rounded-2xl text-sm font-medium text-slate-700 shadow-sm hover:border-purple-400 hover:shadow-md transition-all cursor-pointer group"
+                    >
+                      <div className="flex items-center gap-2.5 min-w-0">
+                        <span className="text-xl">{cat.icon || '📈'}</span>
+                        <div className="truncate">
+                          <div className="font-bold text-slate-800 truncate">{cat.name}</div>
+                          <div className="text-xs text-purple-700 font-semibold">
+                            {cat.budget_amount ? `Meta: ${currencyFmt.format(cat.budget_amount)}` : 'Sem meta'}
+                          </div>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <button 
+                          onClick={(e) => { e.stopPropagation(); handleEditCategory(cat); }}
+                          className="p-1 text-slate-400 hover:text-slate-600"
+                          title="Editar"
+                        >
+                          <Edit2 className="w-4 h-4" />
+                        </button>
+                        <button 
+                          onClick={(e) => handleDeleteCategory(cat.id, e)}
+                          disabled={isPending}
+                          className="p-1 text-slate-400 hover:text-rose-600"
+                          title="Excluir"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                    </div>
+                  ))
+                ) : (
+                  <p className="text-xs text-slate-400 col-span-full">Nenhuma categoria marcada como investimento ainda. Ao criar ou editar uma categoria, marque a opção "É um Investimento".</p>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {activeTab === 'preferences' && (
+          <div className="flex flex-col gap-6 max-w-lg">
+            <div className="flex flex-col gap-2">
+              <label className="text-sm font-bold text-slate-700">Dia de Virada do Mês / Renovação do Orçamento</label>
+              <p className="text-xs text-slate-500">
+                Define em qual dia do mês o seu ciclo financeiro recomeça. Por exemplo, se você recebe seu salário no dia 5, selecione 5 para que seu orçamento vá do dia 5 até o dia 4 do mês seguinte.
+              </p>
+              <div className="flex items-center gap-3 mt-2">
+                <input
+                  type="number"
+                  min={1}
+                  max={31}
+                  value={turnoverDay}
+                  onChange={(e) => setTurnoverDay(Math.min(31, Math.max(1, parseInt(e.target.value) || 1)))}
+                  className="w-24 px-4 py-3 rounded-xl border border-slate-200 bg-slate-50/50 text-slate-800 font-bold focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all duration-200"
+                />
+                <span className="text-sm text-slate-600 font-medium">de cada mês</span>
+              </div>
+            </div>
+
+            <button 
+              onClick={handleSaveTurnoverDay}
+              disabled={isPending}
+              className="bg-slate-900 hover:bg-slate-800 text-white font-bold py-3 px-6 rounded-xl transition-all self-start disabled:opacity-70"
+            >
+              {isPending ? 'Salvando...' : 'Salvar Preferências'}
+            </button>
           </div>
         )}
 
@@ -174,16 +339,22 @@ export function SettingsClient({
 
       <Modal 
         isOpen={isModalOpen} 
-        onClose={() => setIsModalOpen(false)}
-        title={`Nova Categoria`}
+        onClose={() => {
+          setIsModalOpen(false)
+          setEditingCategory(null)
+        }}
+        title={editingCategory ? `Editar Categoria: ${editingCategory.name}` : `Nova Categoria`}
       >
         <CategoryForm 
           workspaceId={workspaceId!} 
-          onSuccess={() => setIsModalOpen(false)} 
+          initialData={editingCategory}
+          onSuccess={() => {
+            setIsModalOpen(false)
+            setEditingCategory(null)
+          }} 
         />
       </Modal>
-
-
     </div>
   )
 }
+

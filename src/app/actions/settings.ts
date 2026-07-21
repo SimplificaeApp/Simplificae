@@ -22,3 +22,25 @@ export async function updatePrivacyPin(prevState: any, formData: FormData) {
   revalidatePath('/', 'layout')
   return { success: pin ? 'PIN de Privacidade configurado com sucesso.' : 'PIN removido com sucesso.' }
 }
+
+export async function updateWorkspaceTurnoverDay(workspaceId: string, day: number) {
+  const supabase = await createClient()
+
+  if (day < 1 || day > 31) {
+    return { error: 'O dia de virada deve ser entre 1 e 31.' }
+  }
+
+  const { error } = await supabase
+    .from('workspaces')
+    .update({ month_turnover_day: day })
+    .eq('id', workspaceId)
+
+  if (error) {
+    console.error('Erro ao atualizar dia de virada:', error)
+    return { error: 'Ocorreu um erro ao salvar o dia de virada.' }
+  }
+
+  revalidatePath('/', 'layout')
+  return { success: 'Dia de virada atualizado com sucesso!' }
+}
+
