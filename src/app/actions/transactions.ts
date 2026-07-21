@@ -53,9 +53,25 @@ export async function createTransaction(prevState: any, formData: FormData) {
     return { error: 'Selecione uma conta para transações efetivadas.' }
   }
 
+  const isRecurring = formData.get('is_recurring') === 'true'
+  const recurringMonthsStr = formData.get('recurring_months') as string
+  const recurringMonths = recurringMonthsStr ? parseInt(recurringMonthsStr, 10) : 12
+
   const transactionsToInsert = []
   
-  if (installments > 1 && baseData.type !== 'transfer') {
+  if (isRecurring && baseData.type !== 'transfer') {
+    for (let i = 0; i < recurringMonths; i++) {
+      const dateObj = new Date(baseDate + 'T12:00:00')
+      dateObj.setMonth(dateObj.getMonth() + i)
+      
+      transactionsToInsert.push({
+        ...baseData,
+        amount: numericAmount, // Mantém o valor integral a cada mês!
+        date: dateObj.toISOString().split('T')[0],
+        description: baseData.description
+      })
+    }
+  } else if (installments > 1 && baseData.type !== 'transfer') {
     const installment_id = crypto.randomUUID()
     for (let i = 0; i < installments; i++) {
       const dateObj = new Date(baseDate + 'T12:00:00')
@@ -63,6 +79,7 @@ export async function createTransaction(prevState: any, formData: FormData) {
       
       transactionsToInsert.push({
         ...baseData,
+        amount: numericAmount / installments,
         date: dateObj.toISOString().split('T')[0],
         description: `${baseData.description} (${i + 1}/${installments})`,
         installment_id
@@ -71,6 +88,7 @@ export async function createTransaction(prevState: any, formData: FormData) {
   } else {
     transactionsToInsert.push({
       ...baseData,
+      amount: numericAmount,
       date: baseDate
     })
   }
