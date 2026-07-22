@@ -18,7 +18,7 @@ export default async function PlannedPage() {
     supabase.from('workspaces').select('id, name, type, month_turnover_day').order('created_at', { ascending: true }),
     supabase
       .from('transactions')
-      .select('*, category:categories(*), account:accounts!transactions_account_id_fkey(id, name, color, icon)')
+      .select('*, category:categories(*), account:accounts!transactions_account_id_fkey(id, name, color, icon, type, closing_day, due_day)')
       .order('date', { ascending: true }),
     supabase
       .from('categories')

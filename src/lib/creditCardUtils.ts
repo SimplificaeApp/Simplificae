@@ -249,3 +249,38 @@ export function getInvoiceForOffset(card: any, transactions: any[], offsetMonths
     transactions: txs
   }
 }
+
+export function getCreditCardDueDate(dateStr: string, closingDay: number = 1, dueDay: number = 10): Date {
+  const parts = dateStr.split('-')
+  const y = parseInt(parts[0], 10)
+  const m = parseInt(parts[1], 10) - 1
+  const d = parseInt(parts[2], 10)
+
+  let closingMonth = m
+  let closingYear = y
+
+  if (d > closingDay) {
+    closingMonth += 1
+    if (closingMonth > 11) {
+      closingMonth = 0
+      closingYear += 1
+    }
+  }
+
+  let dueMonth = closingMonth
+  let dueYear = closingYear
+
+  if (dueDay <= closingDay) {
+    dueMonth += 1
+    if (dueMonth > 11) {
+      dueMonth = 0
+      dueYear += 1
+    }
+  }
+
+  const lastDayOfDueMonth = new Date(dueYear, dueMonth + 1, 0).getDate()
+  const finalDueDay = Math.min(dueDay, lastDayOfDueMonth)
+
+  return new Date(dueYear, dueMonth, finalDueDay, 12, 0, 0)
+}
+

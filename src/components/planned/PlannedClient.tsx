@@ -33,6 +33,7 @@ import { TransactionForm } from '@/components/transactions/TransactionForm'
 import { CategoryForm } from '@/components/settings/CategoryForm'
 import { payTransactionNew, unpayTransaction, deleteTransaction } from '@/app/actions/transactions'
 import { updateWorkspaceTurnoverDay } from '@/app/actions/settings'
+import { getCreditCardDueDate } from '@/lib/creditCardUtils'
 import { toast } from 'sonner'
 
 // Dynamic load for ECharts
@@ -66,8 +67,9 @@ type Transaction = {
   account_id?: string
   installment_id?: string
   is_recurring?: boolean
+  ignore_in_cashflow?: boolean
   category?: Category | null
-  account?: { id: string; name: string; icon?: string; color?: string; type?: string } | null
+  account?: { id: string; name: string; icon?: string; color?: string; type?: string; closing_day?: number; due_day?: number } | null
 }
 
 const MONTH_NAMES = [
@@ -148,15 +150,34 @@ export function PlannedClient({
     }
   }, [selectedYear, selectedMonth, turnoverDay])
 
+  const accountsMap = useMemo(() => {
+    const map: Record<string, any> = {}
+    accounts.forEach(acc => {
+      map[acc.id] = acc
+    })
+    return map
+  }, [accounts])
+
   // Filter transactions within the selected cycle period, sorted from most recent to oldest
   const cycleTransactions = useMemo(() => {
     return transactions
       .filter(t => {
-        const txDate = new Date(t.date + 'T12:00:00')
-        return txDate >= cyclePeriod.startDate && txDate <= cyclePeriod.endDate
+        if (t.ignore_in_cashflow) return false
+
+        let txEffectiveDate: Date
+        const acc = t.account_id ? accountsMap[t.account_id] : (t.account || null)
+        if (acc && acc.type === 'credit_card' && t.type === 'expense') {
+          const closingDay = acc.closing_day || 1
+          const dueDay = acc.due_day || 10
+          txEffectiveDate = getCreditCardDueDate(t.date, closingDay, dueDay)
+        } else {
+          txEffectiveDate = new Date(t.date + 'T12:00:00')
+        }
+
+        return txEffectiveDate >= cyclePeriod.startDate && txEffectiveDate <= cyclePeriod.endDate
       })
       .sort((a, b) => new Date(b.date + 'T12:00:00').getTime() - new Date(a.date + 'T12:00:00').getTime())
-  }, [transactions, cyclePeriod])
+  }, [transactions, cyclePeriod, accountsMap])
 
   // Split categories
   const incomeCategories = useMemo(() => categories.filter(c => c.type === 'income'), [categories])
@@ -620,6 +641,7 @@ export function PlannedClient({
     }> = {}
 
     transactions.forEach(t => {
+      if (t.ignore_in_cashflow) return
       if (t.type !== 'expense') return
       const isCatFix = Boolean(t.category_id && fixedCategoryIds.has(t.category_id))
       const isRec = Boolean(t.is_recurring)
