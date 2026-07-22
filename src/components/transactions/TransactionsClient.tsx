@@ -8,6 +8,7 @@ import {
   CreditCard, ChevronDown, ChevronUp, CheckCircle2
 } from 'lucide-react'
 import { Modal } from '@/components/ui/Modal'
+import { CustomSelect } from '@/components/ui/CustomSelect'
 import { TransactionForm } from './TransactionForm'
 import { deleteTransaction, markAsPosted } from '@/app/actions/transactions'
 import { getCreditCardCycles } from '@/lib/creditCardUtils'
@@ -323,6 +324,16 @@ export function TransactionsClient({
     return { income: inc, expense: exp, balance: inc - exp }
   }, [processedItems])
 
+  const categoryOptions = useMemo(() => [
+    { id: 'all', label: 'Todas as Categorias', icon: '🏷️' },
+    ...categories.map(c => ({ id: c.id, label: c.name, icon: c.icon }))
+  ], [categories])
+
+  const accountOptions = useMemo(() => [
+    { id: 'all', label: 'Todas as Contas', icon: '💳' },
+    ...accounts.map(a => ({ id: a.id, label: a.name, icon: a.icon }))
+  ], [accounts])
+
   return (
     <>
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 gap-4">
@@ -382,7 +393,7 @@ export function TransactionsClient({
             placeholder="Buscar por descrição..."
             value={search}
             onChange={e => setSearch(e.target.value)}
-            className="w-full pl-9 pr-8 py-2 rounded-xl border border-slate-200 bg-white text-xs sm:text-sm text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all shadow-xs"
+            className="w-full pl-9 pr-8 py-2.5 rounded-xl border border-slate-200 bg-white text-xs sm:text-sm text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all shadow-2xs"
           />
           {search && (
             <button 
@@ -395,38 +406,22 @@ export function TransactionsClient({
         </div>
 
         {/* Filtro por Categoria */}
-        <div className="relative shrink-0 min-w-[160px]">
-          <select
-            value={categoryFilter}
-            onChange={e => setCategoryFilter(e.target.value)}
-            className="w-full pl-3.5 pr-8 py-2 rounded-xl border border-slate-200 bg-white text-xs sm:text-sm font-semibold text-slate-700 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all shadow-xs appearance-none cursor-pointer"
-          >
-            <option value="all">Todas as Categorias</option>
-            {categories.map(c => (
-              <option key={c.id} value={c.id}>{c.icon ? `${c.icon} ` : ''}{c.name}</option>
-            ))}
-          </select>
-          <div className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-slate-400">
-            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
-          </div>
-        </div>
+        <CustomSelect
+          value={categoryFilter}
+          onChange={setCategoryFilter}
+          options={categoryOptions}
+          placeholder="Todas as Categorias"
+          className="shrink-0 w-full sm:w-[190px]"
+        />
 
         {/* Filtro por Conta */}
-        <div className="relative shrink-0 min-w-[150px]">
-          <select
-            value={accountFilter}
-            onChange={e => setAccountFilter(e.target.value)}
-            className="w-full pl-3.5 pr-8 py-2 rounded-xl border border-slate-200 bg-white text-xs sm:text-sm font-semibold text-slate-700 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all shadow-xs appearance-none cursor-pointer"
-          >
-            <option value="all">Todas as Contas</option>
-            {accounts.map(a => (
-              <option key={a.id} value={a.id}>{a.name}</option>
-            ))}
-          </select>
-          <div className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-slate-400">
-            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
-          </div>
-        </div>
+        <CustomSelect
+          value={accountFilter}
+          onChange={setAccountFilter}
+          options={accountOptions}
+          placeholder="Todas as Contas"
+          className="shrink-0 w-full sm:w-[170px]"
+        />
 
         {/* Filtro por Tipo */}
         <div className="flex bg-slate-100 p-1 rounded-xl shrink-0 overflow-x-auto">
