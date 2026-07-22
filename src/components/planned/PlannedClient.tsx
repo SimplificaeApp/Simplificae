@@ -24,7 +24,8 @@ import {
   Settings2,
   Edit2,
   Sliders,
-  Check
+  Check,
+  Repeat
 } from 'lucide-react'
 import dynamic from 'next/dynamic'
 import { Modal } from '@/components/ui/Modal'
@@ -62,8 +63,11 @@ type Transaction = {
   date: string
   status: string
   category_id?: string
+  account_id?: string
+  installment_id?: string
+  is_recurring?: boolean
   category?: Category | null
-  account?: { id: string; name: string; icon?: string; color?: string } | null
+  account?: { id: string; name: string; icon?: string; color?: string; type?: string } | null
 }
 
 const MONTH_NAMES = [
@@ -90,7 +94,7 @@ export function PlannedClient({
   const [selectedYear, setSelectedYear] = useState(currentDate.getFullYear())
   const [selectedMonth, setSelectedMonth] = useState(currentDate.getMonth()) // 0 - 11
 
-  const [viewMode, setViewMode] = useState<'overview' | 'categories' | 'transactions'>('overview')
+  const [viewMode, setViewMode] = useState<'overview' | 'fixed' | 'categories' | 'transactions'>('overview')
   const [pendingFilter, setPendingFilter] = useState<'all' | 'expense' | 'income'>('all')
 
   // Modals & Popovers
@@ -101,6 +105,8 @@ export function PlannedClient({
   const [isCatModalOpen, setIsCatModalOpen] = useState(false)
   const [isTurnoverModalOpen, setIsTurnoverModalOpen] = useState(false)
   const [tempTurnoverDay, setTempTurnoverDay] = useState(workspace?.month_turnover_day || 1)
+  const [kpiModal, setKpiModal] = useState<{ title: string; type: 'income' | 'fixed' | 'variable' | 'investments' } | null>(null)
+  const [chartCostFilter, setChartCostFilter] = useState<'all' | 'fixed' | 'variable'>('all')
 
   const [isPending, startTransition] = useTransition()
 
@@ -176,14 +182,32 @@ export function PlannedClient({
       .filter(t => t.type === 'income')
       .reduce((acc, t) => acc + Number(t.amount), 0)
 
-    const plannedFixed = fixedCategories.reduce((acc, c) => acc + Number(c.budget_amount || 0), 0)
-    const spentFixed = fixedCategories.reduce((acc, c) => acc + (spentPerCategory[c.id] || 0), 0)
+    const fixedCategoryIds = new Set(fixedCategories.map(c => c.id))
+    const investmentCategoryIds = new Set(investmentCategories.map(c => c.id))
+
+    let spentFixed = 0
+    let spentVariable = 0
+    let spentInvestments = 0
+
+    cycleTransactions.forEach(t => {
+      if (t.type !== 'expense') return
+      const isInvest = t.category_id && investmentCategoryIds.has(t.category_id)
+      const isFix = Boolean(t.is_recurring) || Boolean(t.category_id && fixedCategoryIds.has(t.category_id))
+
+      if (isInvest) {
+        spentInvestments += Number(t.amount)
+      } else if (isFix) {
+        spentFixed += Number(t.amount)
+      } else {
+        spentVariable += Number(t.amount)
+      }
+    })
+
+    const plannedFixedBase = fixedCategories.reduce((acc, c) => acc + Number(c.budget_amount || 0), 0)
+    const plannedFixed = Math.max(plannedFixedBase, spentFixed)
 
     const plannedVariable = variableCategories.reduce((acc, c) => acc + Number(c.budget_amount || 0), 0)
-    const spentVariable = variableCategories.reduce((acc, c) => acc + (spentPerCategory[c.id] || 0), 0)
-
     const plannedInvestments = investmentCategories.reduce((acc, c) => acc + Number(c.budget_amount || 0), 0)
-    const spentInvestments = investmentCategories.reduce((acc, c) => acc + (spentPerCategory[c.id] || 0), 0)
 
     const totalPlannedOutflow = plannedFixed + plannedVariable + plannedInvestments
     const totalSpentOutflow = spentFixed + spentVariable + spentInvestments
@@ -202,18 +226,38 @@ export function PlannedClient({
       totalPlannedOutflow,
       totalSpentOutflow,
       remainingBalance,
-      effectiveIncome
     }
-  }, [incomeCategories, fixedCategories, variableCategories, investmentCategories, cycleTransactions, spentPerCategory])
+  }, [incomeCategories, fixedCategories, variableCategories, investmentCategories, cycleTransactions])
+
+  // Filtragem de dados especificamente para os gráficos com base no chartCostFilter
+  const filteredSpentPerCategory = useMemo(() => {
+    const fixedCategoryIds = new Set(fixedCategories.map(c => c.id))
+    const map: Record<string, number> = {}
+
+    cycleTransactions.forEach(t => {
+      if (t.category_id && t.type === 'expense') {
+        const isFix = Boolean(t.is_recurring) || Boolean(t.category_id && fixedCategoryIds.has(t.category_id))
+        if (chartCostFilter === 'fixed' && !isFix) return
+        if (chartCostFilter === 'variable' && isFix) return
+
+        map[t.category_id] = (map[t.category_id] || 0) + Number(t.amount)
+      }
+    })
+    return map
+  }, [cycleTransactions, chartCostFilter, fixedCategories])
 
   // Category Legend Data for HTML Legend Grid
   const categoryLegendData = useMemo(() => {
     const data: { id: string; name: string; icon: string; value: number; color: string; percent: number }[] = []
     const palette = ['#6366f1', '#f59e0b', '#10b981', '#f43f5e', '#a855f7', '#06b6d4', '#ec4899', '#64748b']
-    const total = metrics.totalSpentOutflow || 1
+    let total = 0
+    categories.forEach(c => {
+      total += filteredSpentPerCategory[c.id] || 0
+    })
+    if (total === 0) total = 1
 
     categories.forEach((c, idx) => {
-      const val = spentPerCategory[c.id] || 0
+      const val = filteredSpentPerCategory[c.id] || 0
       if (val > 0) {
         data.push({
           id: c.id,
@@ -227,13 +271,13 @@ export function PlannedClient({
     })
     data.sort((a, b) => b.value - a.value)
     return data
-  }, [categories, spentPerCategory, metrics.totalSpentOutflow])
+  }, [categories, filteredSpentPerCategory])
 
   // Chart Options - Top 5 Maiores Categorias de Gasto (Limpo sem números sobrepostos no eixo X)
   const topCategoriesChartOption = useMemo(() => {
     const catSpending: { name: string; value: number }[] = []
     categories.forEach(c => {
-      const val = spentPerCategory[c.id] || 0
+      const val = filteredSpentPerCategory[c.id] || 0
       if (val > 0) {
         catSpending.push({ name: `${c.icon || '📌'} ${c.name}`, value: val })
       }
@@ -487,6 +531,131 @@ export function PlannedClient({
     })
   }, [cycleTransactions, pendingFilter])
 
+  const creditCardAccountsMap = useMemo(() => {
+    const map: Record<string, any> = {}
+    accounts.forEach(acc => {
+      if (acc.type === 'credit_card') map[acc.id] = acc
+    })
+    return map
+  }, [accounts])
+
+  const { creditCardGroups, standardTransactions } = useMemo(() => {
+    const groups: Record<string, { card: any; transactions: Transaction[]; total: number; isPaid: boolean }> = {}
+    const standard: Transaction[] = []
+
+    pendingTransactions.forEach(t => {
+      const card = t.account_id ? creditCardAccountsMap[t.account_id] : null
+      if (card && t.type === 'expense') {
+        if (!groups[card.id]) {
+          groups[card.id] = { card, transactions: [], total: 0, isPaid: false }
+        }
+        groups[card.id].transactions.push(t)
+        groups[card.id].total += Number(t.amount)
+      } else {
+        standard.push(t)
+      }
+    })
+
+    Object.values(groups).forEach(g => {
+      g.isPaid = g.transactions.length > 0 && g.transactions.every(t => t.status === 'paid_planned')
+    })
+
+    return { creditCardGroups: Object.values(groups), standardTransactions: standard }
+  }, [pendingTransactions, creditCardAccountsMap])
+
+  const kpiModalTransactions = useMemo(() => {
+    if (!kpiModal) return []
+    const fixedCategoryIds = new Set(fixedCategories.map(c => c.id))
+    const investmentCategoryIds = new Set(investmentCategories.map(c => c.id))
+
+    return cycleTransactions.filter(t => {
+      if (kpiModal.type === 'income') return t.type === 'income'
+      if (t.type !== 'expense') return false
+
+      const isInvest = t.category_id && investmentCategoryIds.has(t.category_id)
+      const isFix = Boolean(t.is_recurring) || Boolean(t.category_id && fixedCategoryIds.has(t.category_id))
+
+      if (kpiModal.type === 'investments') return isInvest
+      if (kpiModal.type === 'fixed') return isFix && !isInvest
+      if (kpiModal.type === 'variable') return !isFix && !isInvest
+
+      return true
+    })
+  }, [kpiModal, cycleTransactions, fixedCategories, investmentCategories])
+
+  const { kpiCreditCardGroups, kpiStandardTransactions } = useMemo(() => {
+    const groups: Record<string, { card: any; transactions: Transaction[]; total: number }> = {}
+    const standard: Transaction[] = []
+
+    kpiModalTransactions.forEach(t => {
+      const card = t.account_id ? creditCardAccountsMap[t.account_id] : null
+      if (card && t.type === 'expense') {
+        if (!groups[card.id]) {
+          groups[card.id] = { card, transactions: [], total: 0 }
+        }
+        groups[card.id].transactions.push(t)
+        groups[card.id].total += Number(t.amount)
+      } else {
+        standard.push(t)
+      }
+    })
+
+    return { kpiCreditCardGroups: Object.values(groups), kpiStandardTransactions: standard }
+  }, [kpiModalTransactions, creditCardAccountsMap])
+
+  // Lista unificada de Contas Fixas e Recorrentes
+  const fixedBillsList = useMemo(() => {
+    const fixedCategoryIds = new Set(fixedCategories.map(c => c.id))
+    const map: Record<string, {
+      id: string
+      description: string
+      amount: number
+      category: Category | null
+      account: any
+      occurrences: number
+      startDate: string
+      endDate: string
+      lastTransaction: Transaction
+      isCategoryFixed: boolean
+    }> = {}
+
+    transactions.forEach(t => {
+      if (t.type !== 'expense') return
+      const isCatFix = Boolean(t.category_id && fixedCategoryIds.has(t.category_id))
+      const isRec = Boolean(t.is_recurring)
+      if (!isCatFix && !isRec) return
+
+      const key = `${t.description.toLowerCase().trim()}_${t.category_id || 'no_cat'}`
+      if (!map[key]) {
+        map[key] = {
+          id: t.id,
+          description: t.description,
+          amount: Number(t.amount),
+          category: t.category || null,
+          account: t.account || null,
+          occurrences: 0,
+          startDate: t.date,
+          endDate: t.date,
+          lastTransaction: t,
+          isCategoryFixed: isCatFix
+        }
+      }
+
+      map[key].occurrences += 1
+      if (t.date < map[key].startDate) map[key].startDate = t.date
+      if (t.date > map[key].endDate) {
+        map[key].endDate = t.date
+        map[key].lastTransaction = t
+      }
+    })
+
+    return Object.values(map).sort((a, b) => b.amount - a.amount)
+  }, [transactions, fixedCategories])
+
+  const totalFixedMonthly = useMemo(() => {
+    return fixedBillsList.reduce((acc, item) => acc + item.amount, 0)
+  }, [fixedBillsList])
+
   // Handlers
   const handlePrevMonth = () => {
     if (selectedMonth === 0) {
@@ -657,6 +826,13 @@ export function PlannedClient({
           <BarChart3 className="w-3.5 h-3.5 sm:w-4 sm:h-4" /> Visão Geral & Gráficos
         </button>
         <button
+          onClick={() => setViewMode('fixed')}
+          className={`flex items-center gap-1.5 px-3.5 sm:px-5 py-2.5 font-bold text-xs sm:text-sm transition-all border-b-2 shrink-0 ${viewMode === 'fixed' ? 'border-emerald-500 text-emerald-600' : 'border-transparent text-slate-500 hover:text-slate-700'
+            }`}
+        >
+          <Repeat className="w-3.5 h-3.5 sm:w-4 sm:h-4" /> Contas Fixas ({fixedBillsList.length})
+        </button>
+        <button
           onClick={() => setViewMode('categories')}
           className={`flex items-center gap-1.5 px-3.5 sm:px-5 py-2.5 font-bold text-xs sm:text-sm transition-all border-b-2 shrink-0 ${viewMode === 'categories' ? 'border-emerald-500 text-emerald-600' : 'border-transparent text-slate-500 hover:text-slate-700'
             }`}
@@ -680,11 +856,14 @@ export function PlannedClient({
         className="grid grid-cols-2 lg:grid-cols-4 gap-2.5 sm:gap-4"
       >
         {/* Card 1: Receita / Salário */}
-        <div className="glass-panel p-3.5 sm:p-5 rounded-2xl flex flex-col justify-between border-l-4 border-l-emerald-500 hover:shadow-lg transition-all">
+        <div
+          onClick={() => setKpiModal({ title: 'Receita Prevista', type: 'income' })}
+          className="glass-panel p-3.5 sm:p-5 rounded-2xl flex flex-col justify-between border-l-4 border-l-emerald-500 hover:shadow-lg transition-all cursor-pointer active:scale-[0.98] group"
+        >
           <div>
             <div className="flex justify-between items-center mb-1 sm:mb-2">
               <span className="text-[10px] sm:text-xs font-bold uppercase tracking-wider text-slate-400 truncate">Receita Prevista</span>
-              <ArrowUpRight className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-emerald-500 shrink-0" />
+              <ArrowUpRight className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-emerald-500 shrink-0 group-hover:translate-x-0.5 transition-transform" />
             </div>
             <div className="text-base sm:text-2xl font-black text-slate-800 truncate">
               {currencyFmt.format(metrics.plannedIncome || metrics.realizedIncome)}
@@ -697,11 +876,14 @@ export function PlannedClient({
         </div>
 
         {/* Card 2: Custos Fixos */}
-        <div className="glass-panel p-3.5 sm:p-5 rounded-2xl flex flex-col justify-between border-l-4 border-l-rose-500 hover:shadow-lg transition-all">
+        <div
+          onClick={() => setKpiModal({ title: 'Custos Fixos', type: 'fixed' })}
+          className="glass-panel p-3.5 sm:p-5 rounded-2xl flex flex-col justify-between border-l-4 border-l-rose-500 hover:shadow-lg transition-all cursor-pointer active:scale-[0.98] group"
+        >
           <div>
             <div className="flex justify-between items-center mb-1 sm:mb-2">
               <span className="text-[10px] sm:text-xs font-bold uppercase tracking-wider text-slate-400 truncate">Custos Fixos</span>
-              <ArrowDownRight className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-rose-500 shrink-0" />
+              <ArrowDownRight className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-rose-500 shrink-0 group-hover:translate-y-0.5 transition-transform" />
             </div>
             <div className="text-base sm:text-2xl font-black text-slate-800 truncate">
               {currencyFmt.format(metrics.spentFixed)}
@@ -714,11 +896,14 @@ export function PlannedClient({
         </div>
 
         {/* Card 3: Custos Variáveis */}
-        <div className="glass-panel p-3.5 sm:p-5 rounded-2xl flex flex-col justify-between border-l-4 border-l-amber-500 hover:shadow-lg transition-all">
+        <div
+          onClick={() => setKpiModal({ title: 'Custos Variáveis', type: 'variable' })}
+          className="glass-panel p-3.5 sm:p-5 rounded-2xl flex flex-col justify-between border-l-4 border-l-amber-500 hover:shadow-lg transition-all cursor-pointer active:scale-[0.98] group"
+        >
           <div>
             <div className="flex justify-between items-center mb-1 sm:mb-2">
               <span className="text-[10px] sm:text-xs font-bold uppercase tracking-wider text-slate-400 truncate">Custos Variáveis</span>
-              <Layers className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-amber-500 shrink-0" />
+              <Layers className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-amber-500 shrink-0 group-hover:scale-110 transition-transform" />
             </div>
             <div className="text-base sm:text-2xl font-black text-slate-800 truncate">
               {currencyFmt.format(metrics.spentVariable)}
@@ -731,11 +916,14 @@ export function PlannedClient({
         </div>
 
         {/* Card 4: Investimentos */}
-        <div className="glass-panel p-3.5 sm:p-5 rounded-2xl flex flex-col justify-between border-l-4 border-l-purple-500 hover:shadow-lg transition-all">
+        <div
+          onClick={() => setKpiModal({ title: 'Investimentos', type: 'investments' })}
+          className="glass-panel p-3.5 sm:p-5 rounded-2xl flex flex-col justify-between border-l-4 border-l-purple-500 hover:shadow-lg transition-all cursor-pointer active:scale-[0.98] group"
+        >
           <div>
             <div className="flex justify-between items-center mb-1 sm:mb-2">
               <span className="text-[10px] sm:text-xs font-bold uppercase tracking-wider text-slate-400 truncate">Investimentos</span>
-              <PiggyBank className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-purple-600 shrink-0" />
+              <PiggyBank className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-purple-600 shrink-0 group-hover:scale-110 transition-transform" />
             </div>
             <div className="text-base sm:text-2xl font-black text-purple-700 truncate">
               {currencyFmt.format(metrics.spentInvestments)}
@@ -779,6 +967,38 @@ export function PlannedClient({
           transition={{ duration: 0.3 }}
           className="flex flex-col gap-4 sm:gap-6"
         >
+          {/* Seletor de Filtro de Custos para os Gráficos */}
+          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 p-3.5 rounded-2xl glass-panel border border-slate-200/80 bg-gradient-to-r from-slate-50 via-white to-indigo-50/20 shadow-xs">
+            <div className="flex items-center gap-2">
+              <Sliders className="w-4 h-4 text-indigo-600" />
+              <span className="font-bold text-xs sm:text-sm text-slate-800">Filtro dos Gráficos:</span>
+            </div>
+
+            <div className="flex bg-slate-100 p-1 rounded-xl text-xs font-bold w-full sm:w-auto">
+              <button
+                onClick={() => setChartCostFilter('all')}
+                className={`flex-1 sm:flex-none px-3 py-1.5 rounded-lg transition-all flex items-center justify-center gap-1.5 ${chartCostFilter === 'all' ? 'bg-white text-indigo-600 shadow-xs font-extrabold' : 'text-slate-500 hover:text-slate-800'
+                  }`}
+              >
+                <span>🌐 Todos os Custos</span>
+              </button>
+              <button
+                onClick={() => setChartCostFilter('fixed')}
+                className={`flex-1 sm:flex-none px-3 py-1.5 rounded-lg transition-all flex items-center justify-center gap-1.5 ${chartCostFilter === 'fixed' ? 'bg-white text-rose-600 shadow-xs font-extrabold' : 'text-slate-500 hover:text-slate-800'
+                  }`}
+              >
+                <span>📌 Apenas Fixos</span>
+              </button>
+              <button
+                onClick={() => setChartCostFilter('variable')}
+                className={`flex-1 sm:flex-none px-3 py-1.5 rounded-lg transition-all flex items-center justify-center gap-1.5 ${chartCostFilter === 'variable' ? 'bg-white text-amber-600 shadow-xs font-extrabold' : 'text-slate-500 hover:text-slate-800'
+                  }`}
+              >
+                <span>🛒 Apenas Variáveis</span>
+              </button>
+            </div>
+          </div>
+
           {/* Linha 1 de Gráficos: 1. Top Gastos & 2. Distribuição por Categoria */}
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 sm:gap-6">
             {/* Gráfico 1: Top 5 Maiores Gastos (Left 6 cols) */}
@@ -864,6 +1084,126 @@ export function PlannedClient({
               </div>
             </div>
           </div>
+        </motion.div>
+      )}
+
+      {/* 2. CONTAS FIXAS & RECORRENTES */}
+      {viewMode === 'fixed' && (
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ duration: 0.3 }}
+          className="flex flex-col gap-4 sm:gap-6"
+        >
+          {/* Header Banner de Custos Fixos */}
+          <div className="glass-panel p-4 sm:p-6 rounded-2xl flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-gradient-to-r from-rose-500/5 via-amber-500/5 to-transparent border-rose-200/60">
+            <div>
+              <h3 className="font-black text-slate-900 text-base sm:text-lg flex items-center gap-2">
+                <Repeat className="w-5 h-5 text-rose-500" />
+                Painel de Contas Fixas & Recorrentes
+              </h3>
+              <p className="text-xs text-slate-500 mt-0.5">
+                Acompanhe todas as suas contas de valor fixo, mensalidades e durações programadas.
+              </p>
+            </div>
+
+            <div className="flex items-center gap-4 bg-white p-3 rounded-2xl border border-slate-200/80 shadow-xs shrink-0">
+              <div>
+                <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">Total Fixo Mensal</span>
+                <span className="text-lg font-black text-rose-600 tabular-nums">{currencyFmt.format(totalFixedMonthly)}</span>
+              </div>
+              <div className="h-8 w-px bg-slate-200" />
+              <div>
+                <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">Compromissos</span>
+                <span className="text-lg font-black text-slate-800 tabular-nums">{fixedBillsList.length} ativas</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Grid de Cards das Contas Fixas */}
+          {fixedBillsList.length > 0 ? (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
+              {fixedBillsList.map(bill => {
+                const startObj = new Date(bill.startDate + 'T12:00:00')
+                const endObj = new Date(bill.endDate + 'T12:00:00')
+
+                return (
+                  <div
+                    key={bill.id}
+                    className="p-4 rounded-2xl glass-panel flex flex-col justify-between gap-3 border-l-4 border-l-rose-500 hover:shadow-md transition-all group"
+                  >
+                    {/* Top line: Icon + Description + Amount */}
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                        <div
+                          className="w-10 h-10 rounded-xl flex items-center justify-center text-lg shrink-0 border"
+                          style={{
+                            backgroundColor: `${bill.category?.color || '#f43f5e'}15`,
+                            borderColor: `${bill.category?.color || '#f43f5e'}30`
+                          }}
+                        >
+                          {bill.category?.icon || '🔁'}
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <h4 className="font-bold text-slate-900 text-xs sm:text-sm leading-snug truncate">
+                            {bill.description}
+                          </h4>
+                          <span className="text-[11px] font-medium text-slate-400">
+                            {bill.category?.name || 'Custo Fixo'}
+                          </span>
+                        </div>
+                      </div>
+
+                      <div className="text-right shrink-0">
+                        <span className="text-xs sm:text-sm font-black text-rose-600 tabular-nums block">
+                          {currencyFmt.format(bill.amount)}
+                        </span>
+                        <span className="text-[10px] font-semibold text-slate-400">/mês</span>
+                      </div>
+                    </div>
+
+                    {/* Middle line: Duração e Informações */}
+                    <div className="p-2.5 rounded-xl bg-slate-50 border border-slate-100 flex flex-col gap-1 text-[11px] text-slate-600">
+                      <div className="flex justify-between items-center">
+                        <span className="text-slate-400">Período:</span>
+                        <span className="font-bold text-slate-800">
+                          {MONTH_NAMES[startObj.getMonth()]} {startObj.getFullYear()} → {MONTH_NAMES[endObj.getMonth()]} {endObj.getFullYear()}
+                        </span>
+                      </div>
+                      <div className="flex justify-between items-center">
+                        <span className="text-slate-400">Frequência:</span>
+                        <span className="font-semibold text-rose-700 bg-rose-50 px-1.5 py-0.5 rounded-md">
+                          {bill.occurrences > 1 ? `Programado para ${bill.occurrences} meses` : 'Mensal Contínuo'}
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Bottom line: Ações de edição */}
+                    <div className="flex items-center justify-end gap-2 pt-1 border-t border-slate-100">
+                      <button
+                        onClick={() => {
+                          setEditingTx(bill.lastTransaction)
+                          setIsTxModalOpen(true)
+                        }}
+                        className="px-3 py-1.5 text-xs font-bold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg transition-all flex items-center gap-1 active:scale-95"
+                      >
+                        <Edit2 className="w-3.5 h-3.5 text-slate-600" />
+                        <span>Gerenciar</span>
+                      </button>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          ) : (
+            <div className="p-12 glass-panel rounded-2xl text-center flex flex-col items-center gap-2">
+              <Repeat className="w-12 h-12 text-slate-300" />
+              <h4 className="font-bold text-slate-700 text-sm">Nenhuma conta fixa ou recorrente cadastrada</h4>
+              <p className="text-xs text-slate-400 max-w-sm">
+                Ao cadastrar um novo lançamento e marcar como "Fixo / Recorrente", ele aparecerá automaticamente aqui com todos os detalhes de duração.
+              </p>
+            </div>
+          )}
         </motion.div>
       )}
 
@@ -1066,74 +1406,144 @@ export function PlannedClient({
           </div>
 
           {pendingTransactions.length > 0 ? (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5 max-h-[600px] overflow-y-auto pr-0.5">
-              {pendingTransactions.map(t => {
-                const isPaid = t.status === 'paid_planned' || t.status === 'posted'
-                const isOverdue = new Date(t.date + 'T12:00:00') < new Date(new Date().setHours(0, 0, 0, 0)) && !isPaid
-
+            <div className="flex flex-col gap-3">
+              {/* Cards de Faturas de Cartão de Crédito Agrupados */}
+              {creditCardGroups.map(group => {
+                const dueDay = group.card.due_day || 10
                 return (
                   <div
-                    key={t.id}
-                    onClick={() => {
-                      setEditingTx(t)
-                      setIsTxModalOpen(true)
-                    }}
-                    className={`p-3.5 rounded-2xl border transition-all flex flex-col gap-2 cursor-pointer group ${isPaid ? 'bg-slate-50 border-slate-200 opacity-60' : (isOverdue ? 'bg-rose-50/40 border-rose-200' : 'bg-white border-slate-200 hover:border-emerald-400 hover:shadow-md')
-                      }`}
+                    key={group.card.id}
+                    className="p-4 rounded-2xl border border-purple-200/80 bg-gradient-to-br from-purple-50/30 via-white to-slate-50 flex flex-col gap-3 shadow-xs"
                   >
-                    {/* Linha Superior: Ícone + Descrição Completa + Valor */}
-                    <div className="flex items-center justify-between gap-2 min-w-0 w-full">
-                      <div className="flex items-center gap-2.5 min-w-0 flex-1">
-                        <div
-                          className="w-8 h-8 sm:w-9 sm:h-9 rounded-xl flex items-center justify-center text-base shrink-0 border"
-                          style={{
-                            backgroundColor: `${t.category?.color || '#94a3b8'}15`,
-                            borderColor: `${t.category?.color || '#94a3b8'}30`
-                          }}
-                        >
-                          {t.category?.icon || (t.type === 'expense' ? '💸' : '💰')}
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 rounded-xl bg-purple-100 text-purple-700 font-bold flex items-center justify-center text-lg shrink-0 border border-purple-200">
+                          {group.card.icon || '💳'}
                         </div>
-                        <div className={`font-bold text-xs sm:text-sm text-slate-800 leading-snug flex-1 ${isPaid ? 'line-through' : ''}`}>
-                          {t.description}
+                        <div>
+                          <h4 className="font-black text-slate-900 text-sm flex items-center gap-2">
+                            <span>Fatura {group.card.name}</span>
+                            <span className="text-[10px] font-bold bg-purple-100 text-purple-700 px-2 py-0.5 rounded-full">
+                              Vence dia {dueDay}
+                            </span>
+                          </h4>
+                          <p className="text-[11px] text-slate-500 font-medium mt-0.5">
+                            {group.transactions.length} {group.transactions.length === 1 ? 'lançamento no ciclo' : 'lançamentos no ciclo'}
+                          </p>
                         </div>
                       </div>
 
-                      <div className={`font-black tabular-nums text-xs sm:text-sm shrink-0 text-right ${t.type === 'expense' ? 'text-rose-600' : 'text-emerald-600'}`}>
-                        {currencyFmt.format(Number(t.amount))}
+                      <div className="text-right">
+                        <div className="text-sm sm:text-base font-black text-rose-600 tabular-nums">
+                          {currencyFmt.format(group.total)}
+                        </div>
+                        <span className={`text-[10px] font-bold ${group.isPaid ? 'text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded-md' : 'text-slate-400'}`}>
+                          {group.isPaid ? '✓ Fatura Paga' : 'Fatura Aberta'}
+                        </span>
                       </div>
                     </div>
 
-                    {/* Linha Inferior: Data • Categoria + Botão de Ação */}
-                    <div className="flex items-center justify-between gap-2 text-[11px] text-slate-500 pt-1.5 border-t border-slate-100/80">
-                      <div className="flex items-center gap-1.5 min-w-0 flex-1">
-                        <span className="font-semibold text-slate-600 shrink-0">{dateFmt.format(new Date(t.date + 'T12:00:00'))}</span>
-                        <span className="shrink-0">•</span>
-                        <span className="truncate text-slate-500">{t.category?.name || 'Geral'}</span>
-                      </div>
-
-                      {isPaid ? (
-                        <button
-                          onClick={(e) => { e.stopPropagation(); handleUnpay(t.id); }}
-                          disabled={isPending}
-                          className="px-2.5 py-1 text-[11px] font-bold text-slate-500 bg-slate-100 hover:bg-slate-200 rounded-lg transition-all shrink-0"
-                        >
-                          Desfazer
-                        </button>
-                      ) : (
-                        <button
-                          onClick={(e) => { e.stopPropagation(); handlePay(t.id); }}
-                          disabled={isPending}
-                          className={`px-3 py-1 rounded-lg text-xs font-bold text-white transition-all shadow-sm flex items-center gap-1 active:scale-95 shrink-0 ${t.type === 'expense' ? 'bg-rose-600 hover:bg-rose-700' : 'bg-emerald-600 hover:bg-emerald-700'
-                            }`}
-                        >
-                          <CheckCircle2 className="w-3.5 h-3.5" />
-                          <span>{t.type === 'expense' ? 'Pagar' : 'Receber'}</span>
-                        </button>
-                      )}
+                    {/* Lista interna de compras do cartão */}
+                    <div className="flex flex-col gap-1.5 pt-2 border-t border-purple-100/70">
+                      {group.transactions.map(t => {
+                        const isTxPaid = t.status === 'paid_planned'
+                        return (
+                          <div
+                            key={t.id}
+                            onClick={() => {
+                              setEditingTx(t)
+                              setIsTxModalOpen(true)
+                            }}
+                            className="flex items-center justify-between p-2 rounded-xl bg-white/80 hover:bg-white border border-slate-100 hover:border-purple-300 cursor-pointer transition-all text-xs"
+                          >
+                            <div className="flex items-center gap-2 min-w-0 flex-1">
+                              <span className="text-sm shrink-0">{t.category?.icon || '💳'}</span>
+                              <span className={`font-semibold text-slate-800 truncate ${isTxPaid ? 'line-through opacity-60' : ''}`}>
+                                {t.description}
+                              </span>
+                              <span className="text-[10px] text-slate-400 shrink-0">({dateFmt.format(new Date(t.date + 'T12:00:00'))})</span>
+                            </div>
+                            <span className="font-bold tabular-nums text-rose-600 shrink-0 ml-2">
+                              {currencyFmt.format(Number(t.amount))}
+                            </span>
+                          </div>
+                        )
+                      })}
                     </div>
                   </div>
                 )
               })}
+
+              {/* Lançamentos de Contas Normais (Bancos, PIX, etc) */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5 max-h-[600px] overflow-y-auto pr-0.5">
+                {standardTransactions.map(t => {
+                  const isPaid = t.status === 'paid_planned' || t.status === 'posted'
+                  const isOverdue = new Date(t.date + 'T12:00:00') < new Date(new Date().setHours(0, 0, 0, 0)) && !isPaid
+
+                  return (
+                    <div
+                      key={t.id}
+                      onClick={() => {
+                        setEditingTx(t)
+                        setIsTxModalOpen(true)
+                      }}
+                      className={`p-3.5 rounded-2xl border transition-all flex flex-col gap-2 cursor-pointer group ${isPaid ? 'bg-slate-50 border-slate-200 opacity-60' : (isOverdue ? 'bg-rose-50/40 border-rose-200' : 'bg-white border-slate-200 hover:border-emerald-400 hover:shadow-md')
+                        }`}
+                    >
+                      {/* Linha Superior: Ícone + Descrição Completa + Valor */}
+                      <div className="flex items-center justify-between gap-2 min-w-0 w-full">
+                        <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                          <div
+                            className="w-8 h-8 sm:w-9 sm:h-9 rounded-xl flex items-center justify-center text-base shrink-0 border"
+                            style={{
+                              backgroundColor: `${t.category?.color || '#94a3b8'}15`,
+                              borderColor: `${t.category?.color || '#94a3b8'}30`
+                            }}
+                          >
+                            {t.category?.icon || (t.type === 'expense' ? '💸' : '💰')}
+                          </div>
+                          <div className={`font-bold text-xs sm:text-sm text-slate-800 leading-snug flex-1 ${isPaid ? 'line-through' : ''}`}>
+                            {t.description}
+                          </div>
+                        </div>
+
+                        <div className={`font-black tabular-nums text-xs sm:text-sm shrink-0 text-right ${t.type === 'expense' ? 'text-rose-600' : 'text-emerald-600'}`}>
+                          {currencyFmt.format(Number(t.amount))}
+                        </div>
+                      </div>
+
+                      {/* Linha Inferior: Data • Categoria + Botão de Ação */}
+                      <div className="flex items-center justify-between gap-2 text-[11px] text-slate-500 pt-1.5 border-t border-slate-100/80">
+                        <div className="flex items-center gap-1.5 min-w-0 flex-1">
+                          <span className="font-semibold text-slate-600 shrink-0">{dateFmt.format(new Date(t.date + 'T12:00:00'))}</span>
+                          <span className="shrink-0">•</span>
+                          <span className="truncate text-slate-500">{t.category?.name || 'Geral'}</span>
+                        </div>
+
+                        {isPaid ? (
+                          <button
+                            onClick={(e) => { e.stopPropagation(); handleUnpay(t.id); }}
+                            disabled={isPending}
+                            className="px-2.5 py-1 text-[11px] font-bold text-slate-500 bg-slate-100 hover:bg-slate-200 rounded-lg transition-all shrink-0"
+                          >
+                            Desfazer
+                          </button>
+                        ) : (
+                          <button
+                            onClick={(e) => { e.stopPropagation(); handlePay(t.id); }}
+                            disabled={isPending}
+                            className={`px-3 py-1 rounded-lg text-xs font-bold text-white transition-all shadow-sm flex items-center gap-1 active:scale-95 shrink-0 ${t.type === 'expense' ? 'bg-rose-600 hover:bg-rose-700' : 'bg-emerald-600 hover:bg-emerald-700'
+                              }`}
+                          >
+                            <CheckCircle2 className="w-3.5 h-3.5" />
+                            <span>{t.type === 'expense' ? 'Pagar' : 'Receber'}</span>
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
             </div>
           ) : (
             <div className="p-8 text-center flex flex-col items-center">
@@ -1144,6 +1554,107 @@ export function PlannedClient({
           )}
         </motion.div>
       )}
+
+      {/* Modal KPI: Detalhes dos Lançamentos por Card */}
+      <Modal
+        isOpen={Boolean(kpiModal)}
+        onClose={() => setKpiModal(null)}
+        title={kpiModal?.title || 'Detalhes'}
+      >
+        <div className="flex flex-col gap-3 max-h-[70vh] overflow-y-auto pr-1 pt-2">
+          <p className="text-xs text-slate-500 font-medium">
+            Lançamentos vinculados a <strong>{kpiModal?.title}</strong> neste ciclo:
+          </p>
+
+          {kpiModalTransactions.length > 0 ? (
+            <div className="flex flex-col gap-3">
+              {/* Grupos de Cartão de Crédito se houverem */}
+              {kpiCreditCardGroups.map(group => (
+                <div
+                  key={group.card.id}
+                  className="p-3.5 rounded-2xl border border-purple-200/90 bg-gradient-to-br from-purple-50/40 via-white to-slate-50 flex flex-col gap-2.5 shadow-xs"
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2.5">
+                      <div className="w-8 h-8 rounded-xl bg-purple-100 text-purple-700 font-bold flex items-center justify-center text-base shrink-0 border border-purple-200">
+                        {group.card.icon || '💳'}
+                      </div>
+                      <div>
+                        <h4 className="font-extrabold text-slate-900 text-xs sm:text-sm">
+                          Fatura {group.card.name}
+                        </h4>
+                        <span className="text-[10px] text-slate-400 font-medium">
+                          {group.transactions.length} compras no ciclo • Vence dia {group.card.due_day || 10}
+                        </span>
+                      </div>
+                    </div>
+                    <span className="font-black text-xs sm:text-sm text-rose-600 tabular-nums">
+                      {currencyFmt.format(group.total)}
+                    </span>
+                  </div>
+
+                  <div className="flex flex-col gap-1.5 pt-1.5 border-t border-purple-100">
+                    {group.transactions.map(t => (
+                      <div
+                        key={t.id}
+                        onClick={() => {
+                          setEditingTx(t)
+                          setIsTxModalOpen(true)
+                        }}
+                        className="p-2.5 rounded-xl bg-white hover:bg-slate-50 border border-slate-100 flex items-center justify-between gap-2 cursor-pointer transition-all active:scale-[0.99]"
+                      >
+                        <div className="flex items-center gap-2 min-w-0 flex-1">
+                          <span className="text-sm shrink-0">{t.category?.icon || '💳'}</span>
+                          <div className="min-w-0 flex-1">
+                            <div className="font-bold text-slate-800 text-xs truncate">{t.description}</div>
+                            <div className="text-[10px] text-slate-400 font-medium">
+                              {dateFmt.format(new Date(t.date + 'T12:00:00'))} • {t.category?.name || 'Geral'}
+                            </div>
+                          </div>
+                        </div>
+                        <span className="font-black text-xs tabular-nums shrink-0 text-rose-600">
+                          {currencyFmt.format(Number(t.amount))}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+
+              {/* Lançamentos comuns (Bancos, PIX, Dinheiro, Receitas) */}
+              {kpiStandardTransactions.map(t => (
+                <div
+                  key={t.id}
+                  onClick={() => {
+                    setEditingTx(t)
+                    setIsTxModalOpen(true)
+                  }}
+                  className="p-3 rounded-xl bg-slate-50 hover:bg-slate-100 border border-slate-200/80 flex items-center justify-between gap-2 cursor-pointer transition-all active:scale-[0.99] group"
+                >
+                  <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                    <span className="text-base shrink-0">{t.category?.icon || (t.type === 'expense' ? '💸' : '💰')}</span>
+                    <div className="min-w-0 flex-1">
+                      <div className="font-bold text-slate-800 text-xs sm:text-sm truncate">{t.description}</div>
+                      <div className="text-[11px] text-slate-400 font-medium">
+                        {dateFmt.format(new Date(t.date + 'T12:00:00'))} • {t.category?.name || 'Geral'}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className={`font-black text-xs sm:text-sm tabular-nums shrink-0 ${t.type === 'income' ? 'text-emerald-600' : 'text-rose-600'}`}>
+                    {currencyFmt.format(Number(t.amount))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="p-8 text-center text-slate-400 flex flex-col items-center gap-2">
+              <CalendarCheck className="w-8 h-8 text-slate-300" />
+              <p className="text-xs font-semibold">Nenhum lançamento encontrado para este filtro no ciclo atual.</p>
+            </div>
+          )}
+        </div>
+      </Modal>
 
       {/* Modal 1: Lançamento de Transação / Planejamento */}
       <Modal

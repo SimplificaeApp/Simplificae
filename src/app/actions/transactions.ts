@@ -68,7 +68,8 @@ export async function createTransaction(prevState: any, formData: FormData) {
         ...baseData,
         amount: numericAmount, // Mantém o valor integral a cada mês!
         date: dateObj.toISOString().split('T')[0],
-        description: baseData.description
+        description: baseData.description,
+        is_recurring: true
       })
     }
   } else if (installments > 1 && baseData.type !== 'transfer') {
@@ -148,7 +149,7 @@ export async function createTransaction(prevState: any, formData: FormData) {
   return { success: 'Transação salva com sucesso!' }
 }
 
-export async function deleteTransaction(id: string) {
+export async function deleteTransaction(id: string, scope: 'single' | 'future' = 'single') {
   const supabase = await createClient()
 
   // Buscar a transação antes de deletar para reverter o saldo
@@ -163,42 +164,63 @@ export async function deleteTransaction(id: string) {
     return { error: 'Transação não encontrada.' }
   }
 
-  let account = null
-  if (tx.account_id) {
-    const { data: acc } = await supabase.from('accounts').select('id, initial_balance').eq('id', tx.account_id).single()
-    account = acc
-  }
+  if (scope === 'future' && (tx.is_recurring || tx.installment_id)) {
+    let query = supabase
+      .from('transactions')
+      .delete()
+      .eq('workspace_id', tx.workspace_id)
+      .gte('date', tx.date)
 
-  // Reverter saldo da conta de origem
-  if (tx.status === 'posted' && account) {
-    let newBalance = Number(account.initial_balance)
-    if (tx.type === 'income') newBalance -= Number(tx.amount)
-    if (tx.type === 'expense' || tx.type === 'transfer') newBalance += Number(tx.amount)
+    if (tx.installment_id) {
+      query = query.eq('installment_id', tx.installment_id)
+    } else {
+      query = query.eq('description', tx.description)
+      if (tx.category_id) query = query.eq('category_id', tx.category_id)
+    }
 
-    await supabase
-      .from('accounts')
-      .update({ initial_balance: newBalance })
-      .eq('id', tx.account_id)
+    const { error } = await query
+    if (error) {
+      console.error("Error deleting future transactions:", error)
+      return { error: 'Erro ao excluir transações futuras.' }
+    }
+  } else {
+    let account = null
+    if (tx.account_id) {
+      const { data: acc } = await supabase.from('accounts').select('id, initial_balance').eq('id', tx.account_id).single()
+      account = acc
+    }
 
-    // Reverter conta de destino se for transferência
-    if (tx.type === 'transfer' && tx.destination_account_id) {
-      const { data: destAcc } = await supabase
+    // Reverter saldo da conta de origem
+    if (tx.status === 'posted' && account) {
+      let newBalance = Number(account.initial_balance)
+      if (tx.type === 'income') newBalance -= Number(tx.amount)
+      if (tx.type === 'expense' || tx.type === 'transfer') newBalance += Number(tx.amount)
+
+      await supabase
         .from('accounts')
-        .select('initial_balance')
-        .eq('id', tx.destination_account_id)
-        .single()
+        .update({ initial_balance: newBalance })
+        .eq('id', tx.account_id)
 
-      if (destAcc) {
-        await supabase
+      // Reverter conta de destino se for transferência
+      if (tx.type === 'transfer' && tx.destination_account_id) {
+        const { data: destAcc } = await supabase
           .from('accounts')
-          .update({ initial_balance: Number(destAcc.initial_balance) - Number(tx.amount) })
+          .select('initial_balance')
           .eq('id', tx.destination_account_id)
+          .single()
+
+        if (destAcc) {
+          await supabase
+            .from('accounts')
+            .update({ initial_balance: Number(destAcc.initial_balance) - Number(tx.amount) })
+            .eq('id', tx.destination_account_id)
+        }
       }
     }
-  }
 
-  const { error } = await supabase.from('transactions').delete().eq('id', id)
-  if (error) return { error: 'Erro ao excluir transação.' }
+    const { error } = await supabase.from('transactions').delete().eq('id', id)
+    if (error) return { error: 'Erro ao excluir transação.' }
+  }
 
   revalidatePath('/', 'layout')
   return { success: 'Transação excluída com sucesso!' }
@@ -330,6 +352,7 @@ export async function updateTransaction(id: string, prevState: any, formData: Fo
     description: formData.get('description') as string,
     status: formData.get('status') as string || 'posted',
     date: formData.get('date') as string,
+    is_recurring: oldTx.is_recurring,
     ignore_in_cashflow: formData.get('ignore_in_cashflow') === 'on'
   }
 

@@ -182,26 +182,45 @@ export function TransactionForm({
     }
   }, [state.success, onSuccess, router])
 
+  const executeDelete = (scope: 'single' | 'future') => {
+    if (!initialData) return
+    setIsDeleting(true)
+    startTransition(async () => {
+      const res = await deleteTransaction(initialData.id, scope)
+      setIsDeleting(false)
+      if (res?.error) toast.error(res.error)
+      else {
+        toast.success(scope === 'future' ? 'Lançamento e próximos excluídos!' : 'Lançamento excluído!')
+        if (onSuccess) onSuccess()
+      }
+    })
+  }
+
   const handleDelete = () => {
     if (!initialData) return
-    toast('Tem certeza que deseja excluir este lançamento?', {
-      action: {
-        label: 'Sim, excluir',
-        onClick: () => {
-          setIsDeleting(true)
-          startTransition(async () => {
-            const res = await deleteTransaction(initialData.id)
-            setIsDeleting(false)
-            if (res?.error) toast.error(res.error)
-            else {
-              toast.success('Lançamento excluído!')
-              if (onSuccess) onSuccess()
-            }
-          })
+
+    const isRecurringOrInstallment = initialData.is_recurring || initialData.installment_id
+
+    if (isRecurringOrInstallment) {
+      toast('Este é um lançamento recorrente/parcelado. Como deseja excluir?', {
+        action: {
+          label: 'Apenas este',
+          onClick: () => executeDelete('single')
+        },
+        cancel: {
+          label: 'Este e os próximos',
+          onClick: () => executeDelete('future')
         }
-      },
-      cancel: { label: 'Cancelar', onClick: () => {} }
-    })
+      })
+    } else {
+      toast('Tem certeza que deseja excluir este lançamento?', {
+        action: {
+          label: 'Sim, excluir',
+          onClick: () => executeDelete('single')
+        },
+        cancel: { label: 'Cancelar', onClick: () => {} }
+      })
+    }
   }
 
   const handleAmountChange = (e: React.ChangeEvent<HTMLInputElement>) => {
