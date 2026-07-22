@@ -152,16 +152,10 @@ export function PlannedClient({
       .sort((a, b) => new Date(b.date + 'T12:00:00').getTime() - new Date(a.date + 'T12:00:00').getTime())
   }, [transactions, cyclePeriod])
 
-  // Helper to check for generic credit card category
-  const isGenericCcCategory = (name: string) => {
-    const n = name.toLowerCase()
-    return n.includes('cartão de crédito') || n.includes('cartao de credito') || n.includes('fatura cartão') || n.includes('fatura cartao')
-  }
-
-  // Split categories (filtering out generic credit card categories to prevent double-counting)
+  // Split categories
   const incomeCategories = useMemo(() => categories.filter(c => c.type === 'income'), [categories])
-  const fixedCategories = useMemo(() => categories.filter(c => c.type === 'expense' && c.is_fixed && !c.is_investment && !isGenericCcCategory(c.name)), [categories])
-  const variableCategories = useMemo(() => categories.filter(c => c.type === 'expense' && !c.is_fixed && !c.is_investment && !isGenericCcCategory(c.name)), [categories])
+  const fixedCategories = useMemo(() => categories.filter(c => c.type === 'expense' && c.is_fixed && !c.is_investment), [categories])
+  const variableCategories = useMemo(() => categories.filter(c => c.type === 'expense' && !c.is_fixed && !c.is_investment), [categories])
   const investmentCategories = useMemo(() => categories.filter(c => c.is_investment), [categories])
 
   // Calculate actual spending per category in this cycle
@@ -169,10 +163,7 @@ export function PlannedClient({
     const map: Record<string, number> = {}
     cycleTransactions.forEach(t => {
       if (t.category_id && t.type === 'expense') {
-        const catName = t.category?.name || ''
-        if (!isGenericCcCategory(catName)) {
-          map[t.category_id] = (map[t.category_id] || 0) + Number(t.amount)
-        }
+        map[t.category_id] = (map[t.category_id] || 0) + Number(t.amount)
       }
     })
     return map

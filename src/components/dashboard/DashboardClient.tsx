@@ -511,9 +511,9 @@ export function DashboardClient({
     return null
   }
 
-  // Recent 5 transactions (from currentMonthTx)
-  const recentTx = currentMonthTx.slice(0, 5);
-  const hasData = currentMonthTx.length > 0;
+  // Recent 5 transactions (from filteredTx, including credit cards)
+  const recentTx = filteredTx.slice(0, 5);
+  const hasData = filteredTx.length > 0;
 
   const fadeUp = {
     initial: { opacity: 0, y: 16 },
@@ -557,37 +557,62 @@ export function DashboardClient({
               </button>
             </div>
 
-            <div className={`${showFilters ? 'flex' : 'hidden'} md:flex flex-col md:flex-row flex-wrap gap-2 w-full md:w-auto`}>
-              <select
-                value={selectedAccount}
-                onChange={(e) => setSelectedAccount(e.target.value)}
-                className="px-3 py-2.5 bg-white border border-slate-200 rounded-xl text-sm font-medium text-slate-700 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 w-full md:w-auto cursor-pointer shadow-sm"
-              >
-                <option value="all">Todas as Contas</option>
-                {accounts.map((a) => (
-                  <option key={a.id} value={a.id}>{a.name}</option>
-                ))}
-              </select>
-              <select
-                value={selectedCategory}
-                onChange={(e) => setSelectedCategory(e.target.value)}
-                className="px-3 py-2.5 bg-white border border-slate-200 rounded-xl text-sm font-medium text-slate-700 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 w-full md:w-auto cursor-pointer shadow-sm"
-              >
-                <option value="all">Todas as Categorias</option>
-                {categories.map((c) => (
-                  <option key={c.id} value={c.id}>{c.name}</option>
-                ))}
-              </select>
-              <label className="flex items-center gap-2 px-4 py-2.5 bg-white border border-slate-200 rounded-xl text-sm font-medium text-slate-700 cursor-pointer hover:bg-slate-50 transition-colors shadow-sm select-none">
+            <div className={`${showFilters ? 'flex' : 'hidden'} md:flex flex-col md:flex-row flex-wrap items-center gap-2.5 w-full md:w-auto bg-slate-100/60 p-1.5 rounded-2xl border border-slate-200/80 shadow-2xs`}>
+              {/* Seletor de Conta Ultramoderno */}
+              <div className="relative w-full md:w-auto">
+                <select
+                  value={selectedAccount}
+                  onChange={(e) => setSelectedAccount(e.target.value)}
+                  className="w-full md:w-auto pl-3.5 pr-8 py-2 bg-white border border-slate-200 rounded-xl text-xs sm:text-sm font-semibold text-slate-700 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all shadow-xs appearance-none cursor-pointer"
+                >
+                  <option value="all">💳 Todas as Contas</option>
+                  {accounts.map((a) => (
+                    <option key={a.id} value={a.id}>{a.icon ? `${a.icon} ` : ''}{a.name}</option>
+                  ))}
+                </select>
+                <div className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-slate-400">
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
+                </div>
+              </div>
+
+              {/* Seletor de Categoria Ultramoderno */}
+              <div className="relative w-full md:w-auto">
+                <select
+                  value={selectedCategory}
+                  onChange={(e) => setSelectedCategory(e.target.value)}
+                  className="w-full md:w-auto pl-3.5 pr-8 py-2 bg-white border border-slate-200 rounded-xl text-xs sm:text-sm font-semibold text-slate-700 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all shadow-xs appearance-none cursor-pointer"
+                >
+                  <option value="all">🏷️ Todas as Categorias</option>
+                  {categories.map((c) => (
+                    <option key={c.id} value={c.id}>{c.icon ? `${c.icon} ` : ''}{c.name}</option>
+                  ))}
+                </select>
+                <div className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-slate-400">
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
+                </div>
+              </div>
+
+              {/* Checkbox Cofrinhos Ultramoderno */}
+              <label className="flex items-center gap-2 px-3.5 py-2 bg-white border border-slate-200 rounded-xl text-xs sm:text-sm font-semibold text-slate-700 cursor-pointer hover:bg-slate-50 transition-all shadow-xs select-none w-full md:w-auto">
                 <input
                   type="checkbox"
                   checked={includeVaults}
                   onChange={(e) => setIncludeVaults(e.target.checked)}
-                  className="w-4 h-4 rounded text-emerald-600 focus:ring-emerald-500 border-slate-300"
+                  className="w-4 h-4 rounded text-emerald-600 focus:ring-emerald-500 border-slate-300 cursor-pointer"
                 />
-                <PiggyBank className="w-4 h-4 text-slate-400" />
+                <PiggyBank className="w-4 h-4 text-emerald-600" />
                 <span>Incluir Cofrinhos</span>
               </label>
+
+              {/* Reset button se houver filtro ativo */}
+              {(selectedAccount !== 'all' || selectedCategory !== 'all') && (
+                <button
+                  onClick={() => { setSelectedAccount('all'); setSelectedCategory('all'); }}
+                  className="px-3 py-2 text-xs font-bold text-rose-600 hover:text-rose-700 bg-rose-50 hover:bg-rose-100 rounded-xl transition-all w-full md:w-auto text-center"
+                >
+                  Limpar
+                </button>
+              )}
             </div>
 
             <div className="flex gap-2 w-full md:w-auto mt-2 md:mt-0">
