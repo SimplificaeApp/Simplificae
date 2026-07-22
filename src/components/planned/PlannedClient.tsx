@@ -2,12 +2,12 @@
 
 import { useState, useMemo, useEffect, useTransition } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { 
-  CalendarDays, 
-  ArrowUpRight, 
-  ArrowDownRight, 
-  Plus, 
-  CheckCircle2, 
+import {
+  CalendarDays,
+  ArrowUpRight,
+  ArrowDownRight,
+  Plus,
+  CheckCircle2,
   Trash2,
   CalendarCheck,
   ChevronLeft,
@@ -92,7 +92,7 @@ export function PlannedClient({
 
   const [viewMode, setViewMode] = useState<'overview' | 'categories' | 'transactions'>('overview')
   const [pendingFilter, setPendingFilter] = useState<'all' | 'expense' | 'income'>('all')
-  
+
   // Modals & Popovers
   const [isTxModalOpen, setIsTxModalOpen] = useState(false)
   const [editingTx, setEditingTx] = useState<Transaction | null>(null)
@@ -101,7 +101,7 @@ export function PlannedClient({
   const [isCatModalOpen, setIsCatModalOpen] = useState(false)
   const [isTurnoverModalOpen, setIsTurnoverModalOpen] = useState(false)
   const [tempTurnoverDay, setTempTurnoverDay] = useState(workspace?.month_turnover_day || 1)
-  
+
   const [isPending, startTransition] = useTransition()
 
   const turnoverDay = workspace?.month_turnover_day || 1
@@ -117,7 +117,7 @@ export function PlannedClient({
           if (instance) {
             try {
               instance.dispatchAction({ type: 'hideTip' })
-            } catch (err) {}
+            } catch (err) { }
           }
         })
       }
@@ -228,6 +228,64 @@ export function PlannedClient({
     data.sort((a, b) => b.value - a.value)
     return data
   }, [categories, spentPerCategory, metrics.totalSpentOutflow])
+
+  // Chart Options - Top 5 Maiores Categorias de Gasto (Limpo sem números sobrepostos no eixo X)
+  const topCategoriesChartOption = useMemo(() => {
+    const catSpending: { name: string; value: number }[] = []
+    categories.forEach(c => {
+      const val = spentPerCategory[c.id] || 0
+      if (val > 0) {
+        catSpending.push({ name: `${c.icon || '📌'} ${c.name}`, value: val })
+      }
+    })
+    catSpending.sort((a, b) => a.value - b.value)
+    const top5 = catSpending.slice(-5)
+
+    return {
+      tooltip: {
+        trigger: 'axis',
+        confiner: true,
+        axisPointer: { type: 'shadow' },
+        extraCssText: 'z-index: 100; border-radius: 12px; box-shadow: 0 10px 25px -5px rgba(0,0,0,0.1); border: 1px solid #e2e8f0;',
+        position: function (point: number[], params: any, dom: any, rect: any, size: any) {
+          let x = point[0] + 15
+          let y = point[1] - (size.contentSize[1] / 2)
+          if (x + size.contentSize[0] > size.viewSize[0]) {
+            x = point[0] - size.contentSize[0] - 15
+          }
+          if (x < 10) x = 10
+          if (y < 10) y = 10
+          return [x, y]
+        },
+        formatter: (params: any[]) => `${params[0].name}: <strong>${currencyFmt.format(params[0].value)}</strong>`
+      },
+      grid: { left: '3%', right: '25%', bottom: '2%', top: '2%', containLabel: true },
+      xAxis: { show: false }, // OCULTA OS NÚMEROS SOBREPOSTOS DO EIXO X!
+      yAxis: { type: 'category', data: top5.map(i => i.name), axisLabel: { color: '#475569', fontSize: 10, fontWeight: 'bold' } },
+      series: [
+        {
+          type: 'bar',
+          data: top5.map(i => i.value),
+          itemStyle: {
+            color: (params: any) => {
+              const colors = ['#818cf8', '#6366f1', '#4f46e5', '#4338ca', '#3730a3']
+              return colors[params.dataIndex % colors.length]
+            },
+            borderRadius: [0, 6, 6, 0]
+          },
+          label: {
+            show: true,
+            position: 'right',
+            formatter: (params: any) => currencyFmt.format(params.value),
+            color: '#334155',
+            fontSize: 10,
+            fontWeight: 'bold'
+          }
+        }
+      ]
+    }
+  }, [categories, spentPerCategory])
+
 
   // Chart Options - ECharts Donut Chart (Distribuição por Categoria Real com Ícones nas Fatias)
   const donutChartOption = useMemo(() => {
@@ -420,63 +478,6 @@ export function PlannedClient({
     }
   }, [metrics])
 
-  // Chart Options - Top 5 Maiores Categorias de Gasto (Limpo sem números sobrepostos no eixo X)
-  const topCategoriesChartOption = useMemo(() => {
-    const catSpending: { name: string; value: number }[] = []
-    categories.forEach(c => {
-      const val = spentPerCategory[c.id] || 0
-      if (val > 0) {
-        catSpending.push({ name: `${c.icon || '📌'} ${c.name}`, value: val })
-      }
-    })
-    catSpending.sort((a, b) => a.value - b.value)
-    const top5 = catSpending.slice(-5)
-
-    return {
-      tooltip: {
-        trigger: 'axis',
-        confiner: true,
-        axisPointer: { type: 'shadow' },
-        extraCssText: 'z-index: 100; border-radius: 12px; box-shadow: 0 10px 25px -5px rgba(0,0,0,0.1); border: 1px solid #e2e8f0;',
-        position: function (point: number[], params: any, dom: any, rect: any, size: any) {
-          let x = point[0] + 15
-          let y = point[1] - (size.contentSize[1] / 2)
-          if (x + size.contentSize[0] > size.viewSize[0]) {
-            x = point[0] - size.contentSize[0] - 15
-          }
-          if (x < 10) x = 10
-          if (y < 10) y = 10
-          return [x, y]
-        },
-        formatter: (params: any[]) => `${params[0].name}: <strong>${currencyFmt.format(params[0].value)}</strong>`
-      },
-      grid: { left: '3%', right: '25%', bottom: '2%', top: '2%', containLabel: true },
-      xAxis: { show: false }, // OCULTA OS NÚMEROS SOBREPOSTOS DO EIXO X!
-      yAxis: { type: 'category', data: top5.map(i => i.name), axisLabel: { color: '#475569', fontSize: 10, fontWeight: 'bold' } },
-      series: [
-        {
-          type: 'bar',
-          data: top5.map(i => i.value),
-          itemStyle: {
-            color: (params: any) => {
-              const colors = ['#818cf8', '#6366f1', '#4f46e5', '#4338ca', '#3730a3']
-              return colors[params.dataIndex % colors.length]
-            },
-            borderRadius: [0, 6, 6, 0]
-          },
-          label: {
-            show: true,
-            position: 'right',
-            formatter: (params: any) => currencyFmt.format(params.value),
-            color: '#334155',
-            fontSize: 10,
-            fontWeight: 'bold'
-          }
-        }
-      ]
-    }
-  }, [categories, spentPerCategory])
-
   // Filter pending transactions for the list
   const pendingTransactions = useMemo(() => {
     return cycleTransactions.filter(t => {
@@ -549,7 +550,7 @@ export function PlannedClient({
           })
         }
       },
-      cancel: { label: 'Cancelar', onClick: () => {} }
+      cancel: { label: 'Cancelar', onClick: () => { } }
     })
   }
 
@@ -578,7 +579,7 @@ export function PlannedClient({
             </p>
           </div>
 
-          <button 
+          <button
             onClick={() => {
               setEditingTx(null)
               setIsTxModalOpen(true)
@@ -633,7 +634,7 @@ export function PlannedClient({
             </button>
           </div>
 
-          <button 
+          <button
             onClick={() => {
               setEditingTx(null)
               setIsTxModalOpen(true)
@@ -650,32 +651,29 @@ export function PlannedClient({
       <div className="flex border-b border-slate-200/80 gap-1 sm:gap-2 overflow-x-auto whitespace-nowrap pb-0.5 no-scrollbar">
         <button
           onClick={() => setViewMode('overview')}
-          className={`flex items-center gap-1.5 px-3.5 sm:px-5 py-2.5 font-bold text-xs sm:text-sm transition-all border-b-2 shrink-0 ${
-            viewMode === 'overview' ? 'border-emerald-500 text-emerald-600' : 'border-transparent text-slate-500 hover:text-slate-700'
-          }`}
+          className={`flex items-center gap-1.5 px-3.5 sm:px-5 py-2.5 font-bold text-xs sm:text-sm transition-all border-b-2 shrink-0 ${viewMode === 'overview' ? 'border-emerald-500 text-emerald-600' : 'border-transparent text-slate-500 hover:text-slate-700'
+            }`}
         >
           <BarChart3 className="w-3.5 h-3.5 sm:w-4 sm:h-4" /> Visão Geral & Gráficos
         </button>
         <button
           onClick={() => setViewMode('categories')}
-          className={`flex items-center gap-1.5 px-3.5 sm:px-5 py-2.5 font-bold text-xs sm:text-sm transition-all border-b-2 shrink-0 ${
-            viewMode === 'categories' ? 'border-emerald-500 text-emerald-600' : 'border-transparent text-slate-500 hover:text-slate-700'
-          }`}
+          className={`flex items-center gap-1.5 px-3.5 sm:px-5 py-2.5 font-bold text-xs sm:text-sm transition-all border-b-2 shrink-0 ${viewMode === 'categories' ? 'border-emerald-500 text-emerald-600' : 'border-transparent text-slate-500 hover:text-slate-700'
+            }`}
         >
           <PieIcon className="w-3.5 h-3.5 sm:w-4 sm:h-4" /> Limites por Categoria ({categories.length})
         </button>
         <button
           onClick={() => setViewMode('transactions')}
-          className={`flex items-center gap-1.5 px-3.5 sm:px-5 py-2.5 font-bold text-xs sm:text-sm transition-all border-b-2 shrink-0 ${
-            viewMode === 'transactions' ? 'border-emerald-500 text-emerald-600' : 'border-transparent text-slate-500 hover:text-slate-700'
-          }`}
+          className={`flex items-center gap-1.5 px-3.5 sm:px-5 py-2.5 font-bold text-xs sm:text-sm transition-all border-b-2 shrink-0 ${viewMode === 'transactions' ? 'border-emerald-500 text-emerald-600' : 'border-transparent text-slate-500 hover:text-slate-700'
+            }`}
         >
           <CalendarCheck className="w-3.5 h-3.5 sm:w-4 sm:h-4" /> Contas do Ciclo ({cycleTransactions.length})
         </button>
       </div>
 
       {/* Grid de Cards Principais (2 cols no mobile, 4 cols no desktop) */}
-      <motion.div 
+      <motion.div
         initial={{ opacity: 0, y: 10 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.3 }}
@@ -751,11 +749,10 @@ export function PlannedClient({
       </motion.div>
 
       {/* Saldo Restante Banner */}
-      <div className={`p-3.5 sm:p-5 rounded-2xl flex flex-row items-center justify-between gap-3 shadow-sm border ${
-        metrics.remainingBalance >= 0 
-          ? 'bg-gradient-to-r from-emerald-500/10 via-teal-500/5 to-transparent border-emerald-500/30' 
+      <div className={`p-3.5 sm:p-5 rounded-2xl flex flex-row items-center justify-between gap-3 shadow-sm border ${metrics.remainingBalance >= 0
+          ? 'bg-gradient-to-r from-emerald-500/10 via-teal-500/5 to-transparent border-emerald-500/30'
           : 'bg-gradient-to-r from-rose-500/10 via-red-500/5 to-transparent border-rose-500/30'
-      }`}>
+        }`}>
         <div className="flex items-center gap-2.5 sm:gap-3 min-w-0">
           <div className={`w-8 h-8 sm:w-10 sm:h-10 rounded-xl flex items-center justify-center text-white shrink-0 ${metrics.remainingBalance >= 0 ? 'bg-emerald-600' : 'bg-rose-600'}`}>
             <Wallet className="w-4 h-4 sm:w-5 sm:h-5" />
@@ -776,30 +773,30 @@ export function PlannedClient({
 
       {/* 1. VISÃO GERAL & GRÁFICOS MASSAS */}
       {viewMode === 'overview' && (
-        <motion.div 
+        <motion.div
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           transition={{ duration: 0.3 }}
           className="flex flex-col gap-4 sm:gap-6"
         >
-          {/* Linha 1 de Gráficos: Planejado vs Realizado & Donut */}
+          {/* Linha 1 de Gráficos: 1. Top Gastos & 2. Distribuição por Categoria */}
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 sm:gap-6">
-            {/* Gráfico 1: Comparativo Bar Chart (Left 7 cols) */}
-            <div className="lg:col-span-7 glass-panel p-4 sm:p-6 rounded-2xl flex flex-col gap-3 overflow-hidden">
+            {/* Gráfico 1: Top 5 Maiores Gastos (Left 6 cols) */}
+            <div className="lg:col-span-6 glass-panel p-4 sm:p-6 rounded-2xl flex flex-col gap-3 overflow-hidden">
               <div>
                 <h3 className="font-black text-slate-800 text-base sm:text-lg flex items-center gap-2">
-                  <BarChart3 className="w-4 h-4 sm:w-5 sm:h-5 text-emerald-600" />
-                  Planejado vs Realizado
+                  <span className="text-indigo-500">🏆</span>
+                  Top 5 Maiores Gastos do Ciclo
                 </h3>
-                <p className="text-[11px] sm:text-xs text-slate-500">Comparação entre seu teto e o gasto real no ciclo</p>
+                <p className="text-[11px] sm:text-xs text-slate-500">Categorias que mais consumiram recursos no mês</p>
               </div>
               <div className="h-72 sm:h-80 w-full pt-2">
-                <ReactECharts option={barChartOption} style={{ height: '100%', width: '100%' }} />
+                <ReactECharts option={topCategoriesChartOption} style={{ height: '100%', width: '100%' }} />
               </div>
             </div>
 
-            {/* Gráfico 2: Alocação Donut Chart (Right 5 cols) */}
-            <div className="lg:col-span-5 glass-panel p-4 sm:p-6 rounded-2xl flex flex-col gap-3 overflow-hidden">
+            {/* Gráfico 2: Distribuição Donut Chart + Legenda (Right 6 cols) */}
+            <div className="lg:col-span-6 glass-panel p-4 sm:p-6 rounded-2xl flex flex-col gap-3 overflow-hidden">
               <div>
                 <h3 className="font-black text-slate-800 text-base sm:text-lg flex items-center gap-2">
                   <PieIcon className="w-4 h-4 sm:w-5 sm:h-5 text-purple-600" />
@@ -811,10 +808,10 @@ export function PlannedClient({
                 <ReactECharts option={donutChartOption} style={{ height: '100%', width: '100%' }} />
               </div>
 
-              {/* Lista Detalhada de Categorias em 2 Colunas Limpas */}
+              {/* Lista Detalhada de Categorias */}
               <div className="flex flex-col gap-1 pt-2 border-t border-slate-100 max-h-48 overflow-y-auto pr-0.5">
                 {categoryLegendData.map(item => (
-                  <div 
+                  <div
                     key={item.id}
                     onClick={() => setViewCategoryDetail(categories.find(c => c.id === item.id) || null)}
                     className="flex items-center justify-between gap-2 p-1.5 rounded-xl hover:bg-slate-50 border border-transparent hover:border-slate-200/60 cursor-pointer transition-all group"
@@ -837,10 +834,24 @@ export function PlannedClient({
             </div>
           </div>
 
-          {/* Linha 2 de Gráficos: Radar de Saúde & Top 5 Maiores Gastos */}
+          {/* Linha 2 de Gráficos: 3. Planejado vs Realizado & 4. Raio-X de Saúde */}
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 sm:gap-6">
-            {/* Gráfico 3: Raio-X de Saúde Financeira (Radar) */}
-            <div className="lg:col-span-6 glass-panel p-4 sm:p-6 rounded-2xl flex flex-col gap-3 overflow-hidden">
+            {/* Gráfico 3: Planejado vs Realizado (Left 7 cols) */}
+            <div className="lg:col-span-7 glass-panel p-4 sm:p-6 rounded-2xl flex flex-col gap-3 overflow-hidden">
+              <div>
+                <h3 className="font-black text-slate-800 text-base sm:text-lg flex items-center gap-2">
+                  <BarChart3 className="w-4 h-4 sm:w-5 sm:h-5 text-emerald-600" />
+                  Planejado vs Realizado
+                </h3>
+                <p className="text-[11px] sm:text-xs text-slate-500">Comparação entre seu teto e o gasto real no ciclo</p>
+              </div>
+              <div className="h-72 sm:h-80 w-full pt-2">
+                <ReactECharts option={barChartOption} style={{ height: '100%', width: '100%' }} />
+              </div>
+            </div>
+
+            {/* Gráfico 4: Raio-X de Saúde Financeira (Right 5 cols) */}
+            <div className="lg:col-span-5 glass-panel p-4 sm:p-6 rounded-2xl flex flex-col gap-3 overflow-hidden">
               <div>
                 <h3 className="font-black text-slate-800 text-base sm:text-lg flex items-center gap-2">
                   <span className="text-emerald-500">🕸️</span>
@@ -852,27 +863,13 @@ export function PlannedClient({
                 <ReactECharts option={radarChartOption} style={{ height: '100%', width: '100%' }} />
               </div>
             </div>
-
-            {/* Gráfico 4: Top 5 Maiores Gastos */}
-            <div className="lg:col-span-6 glass-panel p-4 sm:p-6 rounded-2xl flex flex-col gap-3 overflow-hidden">
-              <div>
-                <h3 className="font-black text-slate-800 text-base sm:text-lg flex items-center gap-2">
-                  <span className="text-indigo-500">🏆</span>
-                  Top 5 Maiores Gastos do Ciclo
-                </h3>
-                <p className="text-[11px] sm:text-xs text-slate-500">Categorias que mais consumiram recursos no mês</p>
-              </div>
-              <div className="h-72 sm:h-80 w-full pt-2">
-                <ReactECharts option={topCategoriesChartOption} style={{ height: '100%', width: '100%' }} />
-              </div>
-            </div>
           </div>
         </motion.div>
       )}
 
       {/* 2. LIMITES POR CATEGORIA (INTERATIVO COM CLIQUE PARA EDITAR) */}
-      {(viewMode === 'categories' || viewMode === 'overview') && (
-        <motion.div 
+      {viewMode === 'categories' && (
+        <motion.div
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           transition={{ duration: 0.3 }}
@@ -903,8 +900,8 @@ export function PlannedClient({
                   const isOver = budget > 0 && spent > budget
 
                   return (
-                    <div 
-                      key={cat.id} 
+                    <div
+                      key={cat.id}
                       onClick={() => setViewCategoryDetail(cat)}
                       className="p-3 bg-white border border-slate-200/80 hover:border-emerald-400 rounded-xl flex flex-col gap-1.5 cursor-pointer shadow-sm hover:shadow-md transition-all group"
                     >
@@ -923,7 +920,7 @@ export function PlannedClient({
                       </div>
                       {budget > 0 && (
                         <div className="w-full bg-slate-100 h-1.5 rounded-full overflow-hidden relative">
-                          <div 
+                          <div
                             className={`h-full rounded-full transition-all duration-500 ${isOver ? 'bg-rose-600' : (pct > 80 ? 'bg-amber-500' : 'bg-emerald-500')}`}
                             style={{ width: `${pct}%` }}
                           />
@@ -949,8 +946,8 @@ export function PlannedClient({
                   const isOver = budget > 0 && spent > budget
 
                   return (
-                    <div 
-                      key={cat.id} 
+                    <div
+                      key={cat.id}
                       onClick={() => setViewCategoryDetail(cat)}
                       className="p-3 bg-white border border-slate-200/80 hover:border-emerald-400 rounded-xl flex flex-col gap-1.5 cursor-pointer shadow-sm hover:shadow-md transition-all group"
                     >
@@ -969,7 +966,7 @@ export function PlannedClient({
                       </div>
                       {budget > 0 && (
                         <div className="w-full bg-slate-100 h-1.5 rounded-full overflow-hidden relative">
-                          <div 
+                          <div
                             className={`h-full rounded-full transition-all duration-500 ${isOver ? 'bg-rose-600' : (pct > 80 ? 'bg-amber-500' : 'bg-emerald-500')}`}
                             style={{ width: `${pct}%` }}
                           />
@@ -994,8 +991,8 @@ export function PlannedClient({
                   const pct = budget > 0 ? Math.min(100, Math.round((spent / budget) * 100)) : 0
 
                   return (
-                    <div 
-                      key={cat.id} 
+                    <div
+                      key={cat.id}
                       onClick={() => setViewCategoryDetail(cat)}
                       className="p-3 bg-white border border-purple-200/80 hover:border-purple-400 rounded-xl flex flex-col gap-1.5 cursor-pointer shadow-sm hover:shadow-md transition-all group"
                     >
@@ -1014,7 +1011,7 @@ export function PlannedClient({
                       </div>
                       {budget > 0 && (
                         <div className="w-full bg-purple-100 h-1.5 rounded-full overflow-hidden relative">
-                          <div 
+                          <div
                             className="h-full bg-purple-600 rounded-full transition-all duration-500"
                             style={{ width: `${pct}%` }}
                           />
@@ -1030,8 +1027,8 @@ export function PlannedClient({
       )}
 
       {/* 3. LISTA DE LANÇAMENTOS DO CICLO */}
-      {(viewMode === 'transactions' || viewMode === 'overview') && (
-        <motion.div 
+      {viewMode === 'transactions' && (
+        <motion.div
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           transition={{ duration: 0.3 }}
@@ -1072,7 +1069,7 @@ export function PlannedClient({
             <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5 max-h-[600px] overflow-y-auto pr-0.5">
               {pendingTransactions.map(t => {
                 const isPaid = t.status === 'paid_planned' || t.status === 'posted'
-                const isOverdue = new Date(t.date + 'T12:00:00') < new Date(new Date().setHours(0,0,0,0)) && !isPaid
+                const isOverdue = new Date(t.date + 'T12:00:00') < new Date(new Date().setHours(0, 0, 0, 0)) && !isPaid
 
                 return (
                   <div
@@ -1081,16 +1078,15 @@ export function PlannedClient({
                       setEditingTx(t)
                       setIsTxModalOpen(true)
                     }}
-                    className={`p-3.5 rounded-2xl border transition-all flex flex-col gap-2 cursor-pointer group ${
-                      isPaid ? 'bg-slate-50 border-slate-200 opacity-60' : (isOverdue ? 'bg-rose-50/40 border-rose-200' : 'bg-white border-slate-200 hover:border-emerald-400 hover:shadow-md')
-                    }`}
+                    className={`p-3.5 rounded-2xl border transition-all flex flex-col gap-2 cursor-pointer group ${isPaid ? 'bg-slate-50 border-slate-200 opacity-60' : (isOverdue ? 'bg-rose-50/40 border-rose-200' : 'bg-white border-slate-200 hover:border-emerald-400 hover:shadow-md')
+                      }`}
                   >
                     {/* Linha Superior: Ícone + Descrição Completa + Valor */}
                     <div className="flex items-center justify-between gap-2 min-w-0 w-full">
                       <div className="flex items-center gap-2.5 min-w-0 flex-1">
-                        <div 
+                        <div
                           className="w-8 h-8 sm:w-9 sm:h-9 rounded-xl flex items-center justify-center text-base shrink-0 border"
-                          style={{ 
+                          style={{
                             backgroundColor: `${t.category?.color || '#94a3b8'}15`,
                             borderColor: `${t.category?.color || '#94a3b8'}30`
                           }}
@@ -1127,9 +1123,8 @@ export function PlannedClient({
                         <button
                           onClick={(e) => { e.stopPropagation(); handlePay(t.id); }}
                           disabled={isPending}
-                          className={`px-3 py-1 rounded-lg text-xs font-bold text-white transition-all shadow-sm flex items-center gap-1 active:scale-95 shrink-0 ${
-                            t.type === 'expense' ? 'bg-rose-600 hover:bg-rose-700' : 'bg-emerald-600 hover:bg-emerald-700'
-                          }`}
+                          className={`px-3 py-1 rounded-lg text-xs font-bold text-white transition-all shadow-sm flex items-center gap-1 active:scale-95 shrink-0 ${t.type === 'expense' ? 'bg-rose-600 hover:bg-rose-700' : 'bg-emerald-600 hover:bg-emerald-700'
+                            }`}
                         >
                           <CheckCircle2 className="w-3.5 h-3.5" />
                           <span>{t.type === 'expense' ? 'Pagar' : 'Receber'}</span>
@@ -1151,8 +1146,8 @@ export function PlannedClient({
       )}
 
       {/* Modal 1: Lançamento de Transação / Planejamento */}
-      <Modal 
-        isOpen={isTxModalOpen} 
+      <Modal
+        isOpen={isTxModalOpen}
         onClose={() => {
           setIsTxModalOpen(false)
           setEditingTx(null)
@@ -1245,7 +1240,7 @@ export function PlannedClient({
                       <span className={isOver ? 'text-rose-600 font-black' : 'text-emerald-600 font-black'}>{pct}%</span>
                     </div>
                     <div className="w-full bg-slate-200 h-2 rounded-full overflow-hidden relative">
-                      <div 
+                      <div
                         className={`h-full rounded-full transition-all duration-500 ${isOver ? 'bg-rose-600' : (pct > 80 ? 'bg-amber-500' : 'bg-emerald-500')}`}
                         style={{ width: `${pct}%` }}
                       />
@@ -1301,9 +1296,8 @@ export function PlannedClient({
                               <button
                                 onClick={(e) => { e.stopPropagation(); handlePay(t.id); }}
                                 disabled={isPending}
-                                className={`px-3 py-1 rounded-lg text-xs font-bold text-white transition-all shadow-sm flex items-center gap-1 active:scale-95 shrink-0 ${
-                                  t.type === 'expense' ? 'bg-rose-600 hover:bg-rose-700' : 'bg-emerald-600 hover:bg-emerald-700'
-                                }`}
+                                className={`px-3 py-1 rounded-lg text-xs font-bold text-white transition-all shadow-sm flex items-center gap-1 active:scale-95 shrink-0 ${t.type === 'expense' ? 'bg-rose-600 hover:bg-rose-700' : 'bg-emerald-600 hover:bg-emerald-700'
+                                  }`}
                               >
                                 <CheckCircle2 className="w-3.5 h-3.5" />
                                 <span>{t.type === 'expense' ? 'Pagar' : 'Receber'}</span>
@@ -1355,9 +1349,8 @@ export function PlannedClient({
                 key={day}
                 type="button"
                 onClick={() => setTempTurnoverDay(day)}
-                className={`px-3 py-1.5 rounded-xl text-xs font-bold border transition-all shrink-0 ${
-                  tempTurnoverDay === day ? 'bg-emerald-600 text-white border-emerald-600 shadow-sm' : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
-                }`}
+                className={`px-3 py-1.5 rounded-xl text-xs font-bold border transition-all shrink-0 ${tempTurnoverDay === day ? 'bg-emerald-600 text-white border-emerald-600 shadow-sm' : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
+                  }`}
               >
                 Dia {day}
               </button>

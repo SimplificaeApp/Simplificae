@@ -18,3 +18,5 @@ Isso significa que a plataforma trabalha em background analisando o fluxo de cai
   - **KR1:** Suporte à arquitetura de Workspaces finalizado.
   - **KR2:** Agente IA básico rodando para categorização de despesas e geração de insights.
   - **KR3:** 100% de cobertura nos fluxos de Receitas, Despesas e Relatórios.
+
+## Criar também uma aba de cofrinhos na parte de investimentos, onde eu posso deixar o dinheiro e ai ele ja me da insights de rentabilidade e onde posso investir para ganhar mais, tipo quanto renderia esse valor no cdb, poupança, tesouro direto, etc... tudo de forma simples de entender e com isso aumentar a retenção na plataforma.
