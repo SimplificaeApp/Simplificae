@@ -6,45 +6,36 @@ export const dynamic = 'force-dynamic'
 export default async function Home() {
   const supabase = await createClient()
 
-  const [{ data: { user } }, { data: workspaces }] = await Promise.all([
+  const now = new Date()
+  const firstDay = new Date(now.getFullYear(), now.getMonth() - 5, 1).toISOString().split('T')[0]
+  const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0).toISOString().split('T')[0]
+
+  const [
+    { data: { user } },
+    { data: workspaces },
+    txRes,
+    catRes,
+    accRes
+  ] = await Promise.all([
     supabase.auth.getUser(),
-    supabase.from('workspaces').select('id, name, type').order('created_at', { ascending: true })
+    supabase.from('workspaces').select('id, name, type').order('created_at', { ascending: true }),
+    supabase
+      .from('transactions')
+      .select('*, category:categories(id, name, icon, color)')
+      .gte('date', firstDay)
+      .lte('date', lastDay)
+      .order('date', { ascending: false }),
+    supabase
+      .from('categories')
+      .select('*'),
+    supabase
+      .from('accounts')
+      .select('*, account_vaults(*)')
   ])
 
-  const currentWorkspace = workspaces && workspaces.length > 0 ? workspaces[0] : null
-
-  let transactions: any[] = []
-  let categories: any[] = []
-  let accounts: any[] = []
-
-  if (currentWorkspace) {
-    // Buscar transações dos últimos 6 meses até o último dia do mês atual
-    const now = new Date()
-    const firstDay = new Date(now.getFullYear(), now.getMonth() - 5, 1).toISOString().split('T')[0]
-    const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0).toISOString().split('T')[0]
-
-    const [txRes, catRes, accRes] = await Promise.all([
-      supabase
-        .from('transactions')
-        .select('*, category:categories(id, name, icon, color)')
-        .eq('workspace_id', currentWorkspace.id)
-        .gte('date', firstDay)
-        .lte('date', lastDay)
-        .order('date', { ascending: false }),
-      supabase
-        .from('categories')
-        .select('*')
-        .eq('workspace_id', currentWorkspace.id),
-      supabase
-        .from('accounts')
-        .select('*, account_vaults(*)')
-        .eq('workspace_id', currentWorkspace.id)
-    ])
-    
-    transactions = txRes.data || []
-    categories = catRes.data || []
-    accounts = accRes.data || []
-  }
+  const transactions = txRes.data || []
+  const categories = catRes.data || []
+  const accounts = accRes.data || []
 
   return (
     <DashboardClient 

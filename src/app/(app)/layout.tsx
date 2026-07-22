@@ -11,17 +11,14 @@ export default async function AppLayout({
 }) {
   const supabase = await createClient()
 
-  const { data: { user } } = await supabase.auth.getUser()
+  const [{ data: { user } }, { data: workspaces }] = await Promise.all([
+    supabase.auth.getUser(),
+    supabase.from('workspaces').select('id, name, type').order('created_at', { ascending: true })
+  ])
 
   if (!user) {
     redirect('/login')
   }
-
-  // Buscar Workspaces do usuário
-  const { data: workspaces } = await supabase
-    .from('workspaces')
-    .select('id, name, type')
-    .order('created_at', { ascending: true })
 
   return (
     <PrivacyProvider userPin={user.user_metadata?.privacy_pin}>

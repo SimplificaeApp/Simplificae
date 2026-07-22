@@ -145,7 +145,11 @@ export async function createTransaction(prevState: any, formData: FormData) {
     }
   }
 
-  revalidatePath('/', 'layout')
+  revalidatePath('/')
+  revalidatePath('/planned')
+  revalidatePath('/transactions')
+  revalidatePath('/credit-cards')
+  revalidatePath('/accounts')
   return { success: 'Transação salva com sucesso!' }
 }
 
@@ -222,7 +226,11 @@ export async function deleteTransaction(id: string, scope: 'single' | 'future' =
     if (error) return { error: 'Erro ao excluir transação.' }
   }
 
-  revalidatePath('/', 'layout')
+  revalidatePath('/')
+  revalidatePath('/planned')
+  revalidatePath('/transactions')
+  revalidatePath('/credit-cards')
+  revalidatePath('/accounts')
   return { success: 'Transação excluída com sucesso!' }
 }
 
@@ -282,7 +290,11 @@ export async function payTransactionNew(id: string) {
     }
   }
 
-  revalidatePath('/', 'layout')
+  revalidatePath('/')
+  revalidatePath('/planned')
+  revalidatePath('/transactions')
+  revalidatePath('/credit-cards')
+  revalidatePath('/accounts')
   console.error("SERVER ACTION: payTransactionNew SUCCESS");
   return { success: 'Transação marcada como paga!' }
 }
@@ -326,7 +338,11 @@ export async function unpayTransaction(id: string) {
       .eq('id', tx.account_id)
   }
 
-  revalidatePath('/', 'layout')
+  revalidatePath('/')
+  revalidatePath('/planned')
+  revalidatePath('/transactions')
+  revalidatePath('/credit-cards')
+  revalidatePath('/accounts')
   return { success: 'Lançamento desmarcado com sucesso!' }
 }
 
@@ -407,7 +423,11 @@ export async function updateTransaction(id: string, prevState: any, formData: Fo
   const { error } = await supabase.from('transactions').update(baseData).eq('id', id)
   if (error) return { error: 'Erro ao atualizar transação.' }
 
-  revalidatePath('/', 'layout')
+  revalidatePath('/')
+  revalidatePath('/planned')
+  revalidatePath('/transactions')
+  revalidatePath('/credit-cards')
+  revalidatePath('/accounts')
   return { success: 'Transação atualizada!' }
 }
 
@@ -446,6 +466,10 @@ export async function markAsPosted(id: string) {
   const { error } = await supabase.from('transactions').update({ status: 'posted' }).eq('id', id)
   if (error) return { error: 'Erro ao confirmar transação.' }
 
-  revalidatePath('/', 'layout')
+  revalidatePath('/')
+  revalidatePath('/planned')
+  revalidatePath('/transactions')
+  revalidatePath('/credit-cards')
+  revalidatePath('/accounts')
   return { success: 'Transação confirmada!' }
 }
