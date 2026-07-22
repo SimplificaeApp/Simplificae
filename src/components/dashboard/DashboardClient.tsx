@@ -19,6 +19,7 @@ import {
 import { usePrivacy } from "@/components/providers/PrivacyProvider";
 import { useState, useMemo, useCallback } from "react";
 import { Modal } from "@/components/ui/Modal";
+import { CustomSelect } from "@/components/ui/CustomSelect";
 import { TransactionForm } from "@/components/transactions/TransactionForm";
 import { Lock } from "lucide-react";
 import dynamic from "next/dynamic";
@@ -128,6 +129,7 @@ export function DashboardClient({
   const [selectedCategory, setSelectedCategory] = useState<string>("all");
   const [includeVaults, setIncludeVaults] = useState<boolean>(false);
   const [showFilters, setShowFilters] = useState(false);
+  const [activeChartTab, setActiveChartTab] = useState<'fluxo' | 'macro' | 'gastos' | 'saldo' | 'saude'>('fluxo');
   const { isUnlocked, globalBlur, toggleGlobalBlur, requestUnlock, lock } = usePrivacy();
 
   const handleToggleBlur = () => {
@@ -142,6 +144,16 @@ export function DashboardClient({
       toggleGlobalBlur();
     }
   }
+
+  const dashboardAccountOptions = useMemo(() => [
+    { id: "all", label: "Todas as Contas", icon: "💳" },
+    ...accounts.map((a) => ({ id: a.id, label: a.name, icon: a.icon }))
+  ], [accounts]);
+
+  const dashboardCategoryOptions = useMemo(() => [
+    { id: "all", label: "Todas as Categorias", icon: "🏷️" },
+    ...categories.map((c) => ({ id: c.id, label: c.name, icon: c.icon }))
+  ], [categories]);
 
   const filteredTx = useMemo(() => {
     return transactions.filter(t => {
@@ -511,9 +523,9 @@ export function DashboardClient({
     return null
   }
 
-  // Recent 5 transactions (from currentMonthTx)
-  const recentTx = currentMonthTx.slice(0, 5);
-  const hasData = currentMonthTx.length > 0;
+  // Recent 5 transactions (from filteredTx, including credit cards)
+  const recentTx = filteredTx.slice(0, 5);
+  const hasData = filteredTx.length > 0;
 
   const fadeUp = {
     initial: { opacity: 0, y: 16 },
@@ -557,37 +569,46 @@ export function DashboardClient({
               </button>
             </div>
 
-            <div className={`${showFilters ? 'flex' : 'hidden'} md:flex flex-col md:flex-row flex-wrap gap-2 w-full md:w-auto`}>
-              <select
+            <div className={`${showFilters ? 'flex' : 'hidden'} md:flex flex-col md:flex-row flex-wrap items-center gap-2.5 w-full md:w-auto bg-slate-100/60 p-1 rounded-2xl border border-slate-200/80 shadow-2xs`}>
+              {/* Seletor de Conta Ultramoderno */}
+              <CustomSelect
                 value={selectedAccount}
-                onChange={(e) => setSelectedAccount(e.target.value)}
-                className="px-3 py-2.5 bg-white border border-slate-200 rounded-xl text-sm font-medium text-slate-700 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 w-full md:w-auto cursor-pointer shadow-sm"
-              >
-                <option value="all">Todas as Contas</option>
-                {accounts.map((a) => (
-                  <option key={a.id} value={a.id}>{a.name}</option>
-                ))}
-              </select>
-              <select
+                onChange={setSelectedAccount}
+                options={dashboardAccountOptions}
+                placeholder="Todas as Contas"
+                className="w-full md:w-auto min-w-[170px]"
+              />
+
+              {/* Seletor de Categoria Ultramoderno */}
+              <CustomSelect
                 value={selectedCategory}
-                onChange={(e) => setSelectedCategory(e.target.value)}
-                className="px-3 py-2.5 bg-white border border-slate-200 rounded-xl text-sm font-medium text-slate-700 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 w-full md:w-auto cursor-pointer shadow-sm"
-              >
-                <option value="all">Todas as Categorias</option>
-                {categories.map((c) => (
-                  <option key={c.id} value={c.id}>{c.name}</option>
-                ))}
-              </select>
-              <label className="flex items-center gap-2 px-4 py-2.5 bg-white border border-slate-200 rounded-xl text-sm font-medium text-slate-700 cursor-pointer hover:bg-slate-50 transition-colors shadow-sm select-none">
+                onChange={setSelectedCategory}
+                options={dashboardCategoryOptions}
+                placeholder="Todas as Categorias"
+                className="w-full md:w-auto min-w-[185px]"
+              />
+
+              {/* Checkbox Cofrinhos Ultramoderno */}
+              <label className="flex items-center gap-2 px-3.5 py-2 bg-white border border-slate-200 rounded-xl text-xs sm:text-sm font-semibold text-slate-700 cursor-pointer hover:bg-slate-50 transition-all shadow-xs select-none w-full md:w-auto">
                 <input
                   type="checkbox"
                   checked={includeVaults}
                   onChange={(e) => setIncludeVaults(e.target.checked)}
-                  className="w-4 h-4 rounded text-emerald-600 focus:ring-emerald-500 border-slate-300"
+                  className="w-4 h-4 rounded text-emerald-600 focus:ring-emerald-500 border-slate-300 cursor-pointer"
                 />
-                <PiggyBank className="w-4 h-4 text-slate-400" />
+                <PiggyBank className="w-4 h-4 text-emerald-600" />
                 <span>Incluir Cofrinhos</span>
               </label>
+
+              {/* Reset button se houver filtro ativo */}
+              {(selectedAccount !== 'all' || selectedCategory !== 'all') && (
+                <button
+                  onClick={() => { setSelectedAccount('all'); setSelectedCategory('all'); }}
+                  className="px-3 py-2 text-xs font-bold text-rose-600 hover:text-rose-700 bg-rose-50 hover:bg-rose-100 rounded-xl transition-all w-full md:w-auto text-center"
+                >
+                  Limpar
+                </button>
+              )}
             </div>
 
             <div className="flex gap-2 w-full md:w-auto mt-2 md:mt-0">
@@ -708,104 +729,219 @@ export function DashboardClient({
           </motion.div>
         </div>
 
-        {/* Charts Row 1: Area & Macro Bar — ECharts */}
+        {/* Mobile Chart Tabs Selector */}
         {hasData && (
-          <div className="grid grid-cols-1 lg:grid-cols-6 gap-4 md:gap-6 mb-8">
-            {/* Area Chart */}
-            <motion.div
-              {...fadeUp}
-              transition={{ duration: 0.4, delay: 0.2 }}
-              className="lg:col-span-4 glass-panel rounded-2xl p-5 md:p-6"
-            >
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="font-bold text-slate-800">Fluxo Diário <span className="text-slate-400 font-medium text-sm">({MONTHS[new Date().getMonth()]})</span></h3>
-                <div className="flex items-center gap-3 text-xs">
-                  <span className="flex items-center gap-1.5 text-emerald-600 font-semibold"><span className="w-2 h-2 rounded-full bg-emerald-500 inline-block" />Receitas</span>
-                  <span className="flex items-center gap-1.5 text-rose-500 font-semibold"><span className="w-2 h-2 rounded-full bg-rose-500 inline-block" />Despesas</span>
+          <div className="md:hidden mb-6">
+            <div className="bg-slate-200/70 p-1 rounded-2xl flex overflow-x-auto no-scrollbar gap-1 text-xs font-semibold mb-4">
+              <button
+                onClick={() => setActiveChartTab('fluxo')}
+                className={`flex-1 min-w-[75px] py-2 px-2 rounded-xl text-center transition-all ${
+                  activeChartTab === 'fluxo' ? 'bg-white text-emerald-700 shadow-xs font-bold' : 'text-slate-600'
+                }`}
+              >
+                Fluxo
+              </button>
+              <button
+                onClick={() => setActiveChartTab('macro')}
+                className={`flex-1 min-w-[75px] py-2 px-2 rounded-xl text-center transition-all ${
+                  activeChartTab === 'macro' ? 'bg-white text-emerald-700 shadow-xs font-bold' : 'text-slate-600'
+                }`}
+              >
+                6 Meses
+              </button>
+              <button
+                onClick={() => setActiveChartTab('gastos')}
+                className={`flex-1 min-w-[75px] py-2 px-2 rounded-xl text-center transition-all ${
+                  activeChartTab === 'gastos' ? 'bg-white text-emerald-700 shadow-xs font-bold' : 'text-slate-600'
+                }`}
+              >
+                Gastos
+              </button>
+              <button
+                onClick={() => setActiveChartTab('saldo')}
+                className={`flex-1 min-w-[75px] py-2 px-2 rounded-xl text-center transition-all ${
+                  activeChartTab === 'saldo' ? 'bg-white text-emerald-700 shadow-xs font-bold' : 'text-slate-600'
+                }`}
+              >
+                Saldos
+              </button>
+              <button
+                onClick={() => setActiveChartTab('saude')}
+                className={`flex-1 min-w-[75px] py-2 px-2 rounded-xl text-center transition-all ${
+                  activeChartTab === 'saude' ? 'bg-white text-emerald-700 shadow-xs font-bold' : 'text-slate-600'
+                }`}
+              >
+                Saúde
+              </button>
+            </div>
+
+            {/* Mobile Active Chart Display */}
+            {activeChartTab === 'fluxo' && (
+              <motion.div {...fadeUp} className="glass-panel rounded-2xl p-5">
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="font-bold text-slate-800 text-sm">Fluxo Diário</h3>
+                  <div className="flex items-center gap-2 text-[11px]">
+                    <span className="flex items-center gap-1 text-emerald-600 font-semibold"><span className="w-2 h-2 rounded-full bg-emerald-500 inline-block" />Receitas</span>
+                    <span className="flex items-center gap-1 text-rose-500 font-semibold"><span className="w-2 h-2 rounded-full bg-rose-500 inline-block" />Despesas</span>
+                  </div>
                 </div>
-              </div>
-              <div className="h-64 md:h-72">
-                <ReactECharts option={areaChartOption} style={{ height: '100%', width: '100%' }} />
-              </div>
-            </motion.div>
-
-            {/* Gauge */}
-            <motion.div
-              {...fadeUp}
-              transition={{ duration: 0.4, delay: 0.25 }}
-              className="lg:col-span-2 glass-panel rounded-2xl p-5 md:p-6 flex flex-col"
-            >
-              <h3 className="font-bold text-slate-800 mb-1">Saúde Financeira</h3>
-              <p className="text-xs text-slate-400 mb-2">% despesas vs receitas</p>
-              <div className="flex-1 min-h-0 h-48 md:h-full">
-                <ReactECharts option={gaugeOption} style={{ height: '100%', width: '100%' }} />
-              </div>
-              <p className={`text-center text-xs font-bold mt-1 ${spendingRate < 70 ? 'text-emerald-600' : spendingRate < 90 ? 'text-amber-500' : 'text-rose-600'
-                }`}>
-                {spendingRate < 70 ? '✅ Dentro do orçamento' : spendingRate < 90 ? '⚠️ Atenção aos gastos' : '🚨 Gastos elevados'}
-              </p>
-            </motion.div>
-          </div>
-        )}
-
-        {/* Macro Bar Chart */}
-        {hasData && (
-          <div className="mb-8">
-            <motion.div
-              {...fadeUp}
-              transition={{ duration: 0.4, delay: 0.28 }}
-              className="glass-panel rounded-2xl p-5 md:p-6"
-            >
-              <h3 className="font-bold text-slate-800 mb-4">Visão Geral <span className="text-slate-400 font-medium text-sm">(Últimos 6 Meses)</span></h3>
-              <div className="h-64 md:h-72">
-                <ReactECharts option={macroBarOption} style={{ height: '100%', width: '100%' }} />
-              </div>
-            </motion.div>
-          </div>
-        )}
-
-        {/* Charts Row 2: Donuts */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 md:gap-6 mb-8">
-          {/* Donut Despesas */}
-          {hasData && (
-            <motion.div
-              {...fadeUp}
-              transition={{ duration: 0.4, delay: 0.3 }}
-              className="glass-panel rounded-2xl p-5 md:p-6"
-            >
-              <h3 className="font-bold text-slate-800 mb-4">Top Despesas <span className="text-slate-400 font-medium text-sm">(Mês Atual)</span></h3>
-              {donutData.length > 0 ? (
-                <div className="h-64 md:h-72">
-                  <ReactECharts option={donutExpenseOption} style={{ height: '100%', width: '100%' }} />
+                <div className="h-60">
+                  <ReactECharts option={areaChartOption} style={{ height: '100%', width: '100%' }} />
                 </div>
-              ) : (
-                <div className="h-64 flex flex-col items-center justify-center gap-2 text-slate-400">
-                  <BarChart3 className="w-10 h-10 text-slate-200" />
-                  <p className="text-sm">Nenhuma despesa no mês atual</p>
-                </div>
-              )}
-            </motion.div>
-          )}
-
-          {/* Donut Distribuição de Contas */}
-          <motion.div
-            {...fadeUp}
-            transition={{ duration: 0.4, delay: 0.32 }}
-            className="glass-panel rounded-2xl p-5 md:p-6"
-          >
-            <h3 className="font-bold text-slate-800 mb-4">Distribuição do Saldo</h3>
-            {accountDistributionData.length > 0 ? (
-              <div className="h-64 md:h-72">
-                <ReactECharts option={donutDistOption} style={{ height: '100%', width: '100%' }} />
-              </div>
-            ) : (
-              <div className="h-64 flex flex-col items-center justify-center gap-2 text-slate-400">
-                <Wallet className="w-10 h-10 text-slate-200" />
-                <p className="text-sm">Nenhuma conta com saldo positivo</p>
-              </div>
+              </motion.div>
             )}
-          </motion.div>
-        </div>
+
+            {activeChartTab === 'macro' && (
+              <motion.div {...fadeUp} className="glass-panel rounded-2xl p-5">
+                <h3 className="font-bold text-slate-800 text-sm mb-4">Visão Geral (Últimos 6 Meses)</h3>
+                <div className="h-60">
+                  <ReactECharts option={macroBarOption} style={{ height: '100%', width: '100%' }} />
+                </div>
+              </motion.div>
+            )}
+
+            {activeChartTab === 'gastos' && (
+              <motion.div {...fadeUp} className="glass-panel rounded-2xl p-5">
+                <h3 className="font-bold text-slate-800 text-sm mb-4">Top Despesas (Mês Atual)</h3>
+                {donutData.length > 0 ? (
+                  <div className="h-60">
+                    <ReactECharts option={donutExpenseOption} style={{ height: '100%', width: '100%' }} />
+                  </div>
+                ) : (
+                  <div className="h-60 flex flex-col items-center justify-center gap-2 text-slate-400">
+                    <BarChart3 className="w-10 h-10 text-slate-200" />
+                    <p className="text-sm">Nenhuma despesa no mês atual</p>
+                  </div>
+                )}
+              </motion.div>
+            )}
+
+            {activeChartTab === 'saldo' && (
+              <motion.div {...fadeUp} className="glass-panel rounded-2xl p-5">
+                <h3 className="font-bold text-slate-800 text-sm mb-4">Distribuição do Saldo</h3>
+                {accountDistributionData.length > 0 ? (
+                  <div className="h-60">
+                    <ReactECharts option={donutDistOption} style={{ height: '100%', width: '100%' }} />
+                  </div>
+                ) : (
+                  <div className="h-60 flex flex-col items-center justify-center gap-2 text-slate-400">
+                    <Wallet className="w-10 h-10 text-slate-200" />
+                    <p className="text-sm">Nenhuma conta com saldo positivo</p>
+                  </div>
+                )}
+              </motion.div>
+            )}
+
+            {activeChartTab === 'saude' && (
+              <motion.div {...fadeUp} className="glass-panel rounded-2xl p-5 flex flex-col">
+                <h3 className="font-bold text-slate-800 text-sm mb-1">Saúde Financeira</h3>
+                <p className="text-xs text-slate-400 mb-2">% despesas vs receitas</p>
+                <div className="h-52">
+                  <ReactECharts option={gaugeOption} style={{ height: '100%', width: '100%' }} />
+                </div>
+                <p className={`text-center text-xs font-bold mt-2 ${spendingRate < 70 ? 'text-emerald-600' : spendingRate < 90 ? 'text-amber-500' : 'text-rose-600'}`}>
+                  {spendingRate < 70 ? '✅ Dentro do orçamento' : spendingRate < 90 ? '⚠️ Atenção aos gastos' : '🚨 Gastos elevados'}
+                </p>
+              </motion.div>
+            )}
+          </div>
+        )}
+
+        {/* Desktop Charts Layout */}
+        {hasData && (
+          <div className="hidden md:block space-y-8 mb-8">
+            <div className="grid grid-cols-1 lg:grid-cols-6 gap-4 md:gap-6">
+              {/* Area Chart */}
+              <motion.div
+                {...fadeUp}
+                transition={{ duration: 0.4, delay: 0.2 }}
+                className="lg:col-span-4 glass-panel rounded-2xl p-5 md:p-6"
+              >
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="font-bold text-slate-800">Fluxo Diário <span className="text-slate-400 font-medium text-sm">({MONTHS[new Date().getMonth()]})</span></h3>
+                  <div className="flex items-center gap-3 text-xs">
+                    <span className="flex items-center gap-1.5 text-emerald-600 font-semibold"><span className="w-2 h-2 rounded-full bg-emerald-500 inline-block" />Receitas</span>
+                    <span className="flex items-center gap-1.5 text-rose-500 font-semibold"><span className="w-2 h-2 rounded-full bg-rose-500 inline-block" />Despesas</span>
+                  </div>
+                </div>
+                <div className="h-64 md:h-72">
+                  <ReactECharts option={areaChartOption} style={{ height: '100%', width: '100%' }} />
+                </div>
+              </motion.div>
+
+              {/* Gauge */}
+              <motion.div
+                {...fadeUp}
+                transition={{ duration: 0.4, delay: 0.25 }}
+                className="lg:col-span-2 glass-panel rounded-2xl p-5 md:p-6 flex flex-col"
+              >
+                <h3 className="font-bold text-slate-800 mb-1">Saúde Financeira</h3>
+                <p className="text-xs text-slate-400 mb-2">% despesas vs receitas</p>
+                <div className="flex-1 min-h-0 h-48 md:h-full">
+                  <ReactECharts option={gaugeOption} style={{ height: '100%', width: '100%' }} />
+                </div>
+                <p className={`text-center text-xs font-bold mt-1 ${spendingRate < 70 ? 'text-emerald-600' : spendingRate < 90 ? 'text-amber-500' : 'text-rose-600'}`}>
+                  {spendingRate < 70 ? '✅ Dentro do orçamento' : spendingRate < 90 ? '⚠️ Atenção aos gastos' : '🚨 Gastos elevados'}
+                </p>
+              </motion.div>
+            </div>
+
+            {/* Macro Bar Chart */}
+            <div>
+              <motion.div
+                {...fadeUp}
+                transition={{ duration: 0.4, delay: 0.28 }}
+                className="glass-panel rounded-2xl p-5 md:p-6"
+              >
+                <h3 className="font-bold text-slate-800 mb-4">Visão Geral <span className="text-slate-400 font-medium text-sm">(Últimos 6 Meses)</span></h3>
+                <div className="h-64 md:h-72">
+                  <ReactECharts option={macroBarOption} style={{ height: '100%', width: '100%' }} />
+                </div>
+              </motion.div>
+            </div>
+
+            {/* Charts Row 2: Donuts */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 md:gap-6">
+              {/* Donut Despesas */}
+              <motion.div
+                {...fadeUp}
+                transition={{ duration: 0.4, delay: 0.3 }}
+                className="glass-panel rounded-2xl p-5 md:p-6"
+              >
+                <h3 className="font-bold text-slate-800 mb-4">Top Despesas <span className="text-slate-400 font-medium text-sm">(Mês Atual)</span></h3>
+                {donutData.length > 0 ? (
+                  <div className="h-64 md:h-72">
+                    <ReactECharts option={donutExpenseOption} style={{ height: '100%', width: '100%' }} />
+                  </div>
+                ) : (
+                  <div className="h-64 flex flex-col items-center justify-center gap-2 text-slate-400">
+                    <BarChart3 className="w-10 h-10 text-slate-200" />
+                    <p className="text-sm">Nenhuma despesa no mês atual</p>
+                  </div>
+                )}
+              </motion.div>
+
+              {/* Donut Distribuição de Contas */}
+              <motion.div
+                {...fadeUp}
+                transition={{ duration: 0.4, delay: 0.32 }}
+                className="glass-panel rounded-2xl p-5 md:p-6"
+              >
+                <h3 className="font-bold text-slate-800 mb-4">Distribuição do Saldo</h3>
+                {accountDistributionData.length > 0 ? (
+                  <div className="h-64 md:h-72">
+                    <ReactECharts option={donutDistOption} style={{ height: '100%', width: '100%' }} />
+                  </div>
+                ) : (
+                  <div className="h-64 flex flex-col items-center justify-center gap-2 text-slate-400">
+                    <Wallet className="w-10 h-10 text-slate-200" />
+                    <p className="text-sm">Nenhuma conta com saldo positivo</p>
+                  </div>
+                )}
+              </motion.div>
+            </div>
+          </div>
+        )}
 
 
         {/* Recent Transactions */}

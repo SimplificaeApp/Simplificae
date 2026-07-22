@@ -13,7 +13,6 @@ const PAGE_LABELS: Record<string, { label: string; icon: any }> = {
   '/planned': { label: 'Planejamento', icon: CalendarDays },
   '/accounts': { label: 'Contas', icon: Wallet },
   '/credit-cards': { label: 'Cartões', icon: CreditCard },
-  '/reports': { label: 'Relatórios', icon: BarChart3 },
   '/settings': { label: 'Configurações', icon: Settings },
 }
 
@@ -23,7 +22,6 @@ const navItems = [
   { href: '/planned', icon: CalendarDays, label: 'Planejamento' },
   { href: '/credit-cards', icon: CreditCard, label: 'Cartões' },
   { href: '/accounts', icon: Wallet, label: 'Contas' },
-  { href: '/reports', icon: BarChart3, label: 'Relatórios' },
 ]
 
 export function Header({ workspaces = [], user }: { workspaces?: any[], user?: any }) {

@@ -27,7 +27,6 @@ export function Sidebar() {
     { href: '/planned', icon: CalendarDays, label: 'Planejamento' },
     { href: '/credit-cards', icon: CreditCard, label: 'Cartões' },
     { href: '/accounts', icon: Wallet, label: 'Contas' },
-    { href: '/reports', icon: BarChart3, label: 'Relatórios' },
   ]
 
   return (
