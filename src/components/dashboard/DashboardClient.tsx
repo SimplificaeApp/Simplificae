@@ -786,7 +786,7 @@ export function DashboardClient({
                   </div>
                 </div>
                 <div className="h-60">
-                  <ReactECharts option={areaChartOption} style={{ height: '100%', width: '100%' }} />
+                  <ReactECharts notMerge={true} lazyUpdate={true} option={areaChartOption} style={{ height: '100%', width: '100%' }} />
                 </div>
               </motion.div>
             )}
@@ -795,7 +795,7 @@ export function DashboardClient({
               <motion.div {...fadeUp} className="glass-panel rounded-2xl p-5">
                 <h3 className="font-bold text-slate-800 text-sm mb-4">Visão Geral (Últimos 6 Meses)</h3>
                 <div className="h-60">
-                  <ReactECharts option={macroBarOption} style={{ height: '100%', width: '100%' }} />
+                  <ReactECharts notMerge={true} lazyUpdate={true} option={macroBarOption} style={{ height: '100%', width: '100%' }} />
                 </div>
               </motion.div>
             )}
@@ -805,7 +805,7 @@ export function DashboardClient({
                 <h3 className="font-bold text-slate-800 text-sm mb-4">Top Despesas (Mês Atual)</h3>
                 {donutData.length > 0 ? (
                   <div className="h-60">
-                    <ReactECharts option={donutExpenseOption} style={{ height: '100%', width: '100%' }} />
+                    <ReactECharts notMerge={true} lazyUpdate={true} option={donutExpenseOption} style={{ height: '100%', width: '100%' }} />
                   </div>
                 ) : (
                   <div className="h-60 flex flex-col items-center justify-center gap-2 text-slate-400">
@@ -821,7 +821,7 @@ export function DashboardClient({
                 <h3 className="font-bold text-slate-800 text-sm mb-4">Distribuição do Saldo</h3>
                 {accountDistributionData.length > 0 ? (
                   <div className="h-60">
-                    <ReactECharts option={donutDistOption} style={{ height: '100%', width: '100%' }} />
+                    <ReactECharts notMerge={true} lazyUpdate={true} option={donutDistOption} style={{ height: '100%', width: '100%' }} />
                   </div>
                 ) : (
                   <div className="h-60 flex flex-col items-center justify-center gap-2 text-slate-400">
@@ -837,7 +837,7 @@ export function DashboardClient({
                 <h3 className="font-bold text-slate-800 text-sm mb-1">Saúde Financeira</h3>
                 <p className="text-xs text-slate-400 mb-2">% despesas vs receitas</p>
                 <div className="h-52">
-                  <ReactECharts option={gaugeOption} style={{ height: '100%', width: '100%' }} />
+                  <ReactECharts notMerge={true} lazyUpdate={true} option={gaugeOption} style={{ height: '100%', width: '100%' }} />
                 </div>
                 <p className={`text-center text-xs font-bold mt-2 ${spendingRate < 70 ? 'text-emerald-600' : spendingRate < 90 ? 'text-amber-500' : 'text-rose-600'}`}>
                   {spendingRate < 70 ? '✅ Dentro do orçamento' : spendingRate < 90 ? '⚠️ Atenção aos gastos' : '🚨 Gastos elevados'}
@@ -865,7 +865,7 @@ export function DashboardClient({
                   </div>
                 </div>
                 <div className="h-64 md:h-72">
-                  <ReactECharts option={areaChartOption} style={{ height: '100%', width: '100%' }} />
+                  <ReactECharts notMerge={true} lazyUpdate={true} option={areaChartOption} style={{ height: '100%', width: '100%' }} />
                 </div>
               </motion.div>
 
@@ -878,7 +878,7 @@ export function DashboardClient({
                 <h3 className="font-bold text-slate-800 mb-1">Saúde Financeira</h3>
                 <p className="text-xs text-slate-400 mb-2">% despesas vs receitas</p>
                 <div className="flex-1 min-h-0 h-48 md:h-full">
-                  <ReactECharts option={gaugeOption} style={{ height: '100%', width: '100%' }} />
+                  <ReactECharts notMerge={true} lazyUpdate={true} option={gaugeOption} style={{ height: '100%', width: '100%' }} />
                 </div>
                 <p className={`text-center text-xs font-bold mt-1 ${spendingRate < 70 ? 'text-emerald-600' : spendingRate < 90 ? 'text-amber-500' : 'text-rose-600'}`}>
                   {spendingRate < 70 ? '✅ Dentro do orçamento' : spendingRate < 90 ? '⚠️ Atenção aos gastos' : '🚨 Gastos elevados'}
@@ -895,7 +895,7 @@ export function DashboardClient({
               >
                 <h3 className="font-bold text-slate-800 mb-4">Visão Geral <span className="text-slate-400 font-medium text-sm">(Últimos 6 Meses)</span></h3>
                 <div className="h-64 md:h-72">
-                  <ReactECharts option={macroBarOption} style={{ height: '100%', width: '100%' }} />
+                  <ReactECharts notMerge={true} lazyUpdate={true} option={macroBarOption} style={{ height: '100%', width: '100%' }} />
                 </div>
               </motion.div>
             </div>
@@ -911,7 +911,7 @@ export function DashboardClient({
                 <h3 className="font-bold text-slate-800 mb-4">Top Despesas <span className="text-slate-400 font-medium text-sm">(Mês Atual)</span></h3>
                 {donutData.length > 0 ? (
                   <div className="h-64 md:h-72">
-                    <ReactECharts option={donutExpenseOption} style={{ height: '100%', width: '100%' }} />
+                    <ReactECharts notMerge={true} lazyUpdate={true} option={donutExpenseOption} style={{ height: '100%', width: '100%' }} />
                   </div>
                 ) : (
                   <div className="h-64 flex flex-col items-center justify-center gap-2 text-slate-400">
@@ -930,7 +930,7 @@ export function DashboardClient({
                 <h3 className="font-bold text-slate-800 mb-4">Distribuição do Saldo</h3>
                 {accountDistributionData.length > 0 ? (
                   <div className="h-64 md:h-72">
-                    <ReactECharts option={donutDistOption} style={{ height: '100%', width: '100%' }} />
+                    <ReactECharts notMerge={true} lazyUpdate={true} option={donutDistOption} style={{ height: '100%', width: '100%' }} />
                   </div>
                 ) : (
                   <div className="h-64 flex flex-col items-center justify-center gap-2 text-slate-400">

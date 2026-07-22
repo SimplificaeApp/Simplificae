@@ -305,7 +305,6 @@ export function TransactionForm({
           <input 
             type="tel"
             inputMode="numeric"
-            pattern="[0-9]*"
             name="amount"
             value={amount}
             onChange={handleAmountChange}

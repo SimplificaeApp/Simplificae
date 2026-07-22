@@ -6,15 +6,15 @@ export const dynamic = 'force-dynamic'
 
 export default async function PlannedPage() {
   const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
+
+  const [{ data: { user } }, { data: workspaces }] = await Promise.all([
+    supabase.auth.getUser(),
+    supabase.from('workspaces').select('id, name, type, month_turnover_day').order('created_at', { ascending: true })
+  ])
+
   if (!user) {
     redirect('/login')
   }
-
-  const { data: workspaces } = await supabase
-    .from('workspaces')
-    .select('id, name, type, month_turnover_day')
-    .order('created_at', { ascending: true })
 
   const currentWorkspace = workspaces && workspaces.length > 0 ? workspaces[0] : null
   let transactions: any[] = []

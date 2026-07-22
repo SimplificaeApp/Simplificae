@@ -5,12 +5,11 @@ export const dynamic = 'force-dynamic'
 
 export default async function Home() {
   const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
 
-  const { data: workspaces } = await supabase
-    .from('workspaces')
-    .select('id, name, type')
-    .order('created_at', { ascending: true })
+  const [{ data: { user } }, { data: workspaces }] = await Promise.all([
+    supabase.auth.getUser(),
+    supabase.from('workspaces').select('id, name, type').order('created_at', { ascending: true })
+  ])
 
   const currentWorkspace = workspaces && workspaces.length > 0 ? workspaces[0] : null
 

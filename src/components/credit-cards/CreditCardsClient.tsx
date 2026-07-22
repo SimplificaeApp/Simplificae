@@ -264,6 +264,8 @@ export function CreditCardsClient({ workspaceId, creditCards, allAccounts, categ
             </div>
             <div className="h-64 md:h-72 w-full">
               <ReactECharts 
+                notMerge={true}
+                lazyUpdate={true}
                 option={barChartOption} 
                 style={{ height: '100%', width: '100%' }}
               />
@@ -301,6 +303,8 @@ export function CreditCardsClient({ workspaceId, creditCards, allAccounts, categ
                 <>
                   <div className="h-56 md:h-64 w-full">
                     <ReactECharts 
+                      notMerge={true}
+                      lazyUpdate={true}
                       option={donutChartOption} 
                       style={{ height: '100%', width: '100%' }}
                       onEvents={{

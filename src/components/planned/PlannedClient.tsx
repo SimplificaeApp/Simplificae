@@ -791,7 +791,7 @@ export function PlannedClient({
                 <p className="text-[11px] sm:text-xs text-slate-500">Categorias que mais consumiram recursos no mês</p>
               </div>
               <div className="h-72 sm:h-80 w-full pt-2">
-                <ReactECharts option={topCategoriesChartOption} style={{ height: '100%', width: '100%' }} />
+                <ReactECharts notMerge={true} lazyUpdate={true} option={topCategoriesChartOption} style={{ height: '100%', width: '100%' }} />
               </div>
             </div>
 
@@ -805,7 +805,7 @@ export function PlannedClient({
                 <p className="text-[11px] sm:text-xs text-slate-500">Divisão dos recursos gastos no mês</p>
               </div>
               <div className="h-56 sm:h-64 w-full pt-1">
-                <ReactECharts option={donutChartOption} style={{ height: '100%', width: '100%' }} />
+                <ReactECharts notMerge={true} lazyUpdate={true} option={donutChartOption} style={{ height: '100%', width: '100%' }} />
               </div>
 
               {/* Lista Detalhada de Categorias */}
@@ -846,7 +846,7 @@ export function PlannedClient({
                 <p className="text-[11px] sm:text-xs text-slate-500">Comparação entre seu teto e o gasto real no ciclo</p>
               </div>
               <div className="h-72 sm:h-80 w-full pt-2">
-                <ReactECharts option={barChartOption} style={{ height: '100%', width: '100%' }} />
+                <ReactECharts notMerge={true} lazyUpdate={true} option={barChartOption} style={{ height: '100%', width: '100%' }} />
               </div>
             </div>
 
@@ -860,7 +860,7 @@ export function PlannedClient({
                 <p className="text-[11px] sm:text-xs text-slate-500">Equilíbrio dos 4 pilares: Fixos, Variáveis, Aportes e Saldo Livre</p>
               </div>
               <div className="h-72 sm:h-80 w-full pt-2">
-                <ReactECharts option={radarChartOption} style={{ height: '100%', width: '100%' }} />
+                <ReactECharts notMerge={true} lazyUpdate={true} option={radarChartOption} style={{ height: '100%', width: '100%' }} />
               </div>
             </div>
           </div>
