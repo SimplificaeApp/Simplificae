@@ -17,7 +17,9 @@ import {
   Infinity,
   Plus,
   Minus,
-  CheckCircle
+  CheckCircle,
+  ChevronDown,
+  Check
 } from 'lucide-react'
 import { motion, AnimatePresence } from 'framer-motion'
 
@@ -31,6 +33,7 @@ interface Category {
 interface Account {
   id: string
   name: string
+  icon?: string
 }
 
 interface TransactionFormProps {
@@ -43,6 +46,95 @@ interface TransactionFormProps {
   isCreditCard?: boolean
   isPlanningMode?: boolean
   initialData?: any
+}
+
+function CustomSelect({
+  name,
+  value,
+  onChange,
+  options,
+  placeholder,
+  required
+}: {
+  name: string
+  value: string
+  onChange: (val: string) => void
+  options: { id: string; label: string; icon?: string }[]
+  placeholder: string
+  required?: boolean
+}) {
+  const [isOpen, setIsOpen] = useState(false)
+  const selectedOption = options.find(o => o.id === value)
+
+  return (
+    <div className="relative">
+      <input type="hidden" name={name} value={value} required={required} />
+      
+      <button
+        type="button"
+        onClick={() => setIsOpen(!isOpen)}
+        className={`w-full px-3.5 py-2.5 rounded-xl border bg-white text-slate-800 text-sm flex items-center justify-between shadow-2xs transition-all ${
+          isOpen ? 'border-emerald-500 ring-2 ring-emerald-500/20' : 'border-slate-200 hover:border-slate-300'
+        }`}
+      >
+        <span className={`truncate flex items-center gap-2 ${selectedOption ? 'font-semibold text-slate-800' : 'text-slate-400'}`}>
+          {selectedOption ? (
+            <>
+              {selectedOption.icon && <span className="text-base">{selectedOption.icon}</span>}
+              {selectedOption.label}
+            </>
+          ) : (
+            placeholder
+          )}
+        </span>
+        <ChevronDown className={`w-4 h-4 text-slate-400 transition-transform duration-200 shrink-0 ${isOpen ? 'rotate-180 text-emerald-600' : ''}`} />
+      </button>
+
+      <AnimatePresence>
+        {isOpen && (
+          <>
+            <div className="fixed inset-0 z-40" onClick={() => setIsOpen(false)} />
+            <motion.div
+              initial={{ opacity: 0, y: -6, scale: 0.98 }}
+              animate={{ opacity: 1, y: 4, scale: 1 }}
+              exit={{ opacity: 0, y: -6, scale: 0.98 }}
+              transition={{ duration: 0.15 }}
+              className="absolute left-0 right-0 top-full z-50 max-h-52 overflow-y-auto bg-white/98 backdrop-blur-md border border-slate-200 rounded-2xl shadow-xl p-1.5 flex flex-col gap-1 no-scrollbar"
+            >
+              {options.length === 0 ? (
+                <div className="p-3 text-xs text-slate-400 text-center font-medium">Nenhuma opção disponível</div>
+              ) : (
+                options.map(opt => {
+                  const isSelected = opt.id === value
+                  return (
+                    <button
+                      key={opt.id}
+                      type="button"
+                      onClick={() => {
+                        onChange(opt.id)
+                        setIsOpen(false)
+                      }}
+                      className={`flex items-center justify-between w-full px-3 py-2.5 rounded-xl text-xs sm:text-sm font-semibold transition-all ${
+                        isSelected 
+                          ? 'bg-emerald-50 text-emerald-800 font-bold' 
+                          : 'text-slate-700 hover:bg-slate-50 hover:text-slate-900'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2.5 truncate">
+                        {opt.icon && <span className="text-base shrink-0">{opt.icon}</span>}
+                        <span className="truncate">{opt.label}</span>
+                      </div>
+                      {isSelected && <Check className="w-4 h-4 text-emerald-600 shrink-0 ml-2" />}
+                    </button>
+                  )
+                })
+              )}
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
+    </div>
+  )
 }
 
 type State = { error?: string; success?: string }
@@ -69,6 +161,9 @@ export function TransactionForm({
     }
     return ''
   })
+  const [categoryId, setCategoryId] = useState<string>(initialData?.category_id || '')
+  const [accountId, setAccountId] = useState<string>(initialData?.account_id || defaultAccountId || '')
+  const [destinationAccountId, setDestinationAccountId] = useState<string>(initialData?.destination_account_id || '')
   const [isPlanned, setIsPlanned] = useState(initialData?.status === 'pending' || false)
   
   // Frequency mode: 1 = Single, -1 = Recurring/Fixo, >1 = Installments
@@ -200,7 +295,7 @@ export function TransactionForm({
         </div>
       )}
 
-      {/* Valor Input Hero */}
+      {/* Valor Input Hero (NUMERIC KEYPAD FOR MOBILE!) */}
       <div className={`flex flex-col items-center justify-center py-4 px-6 rounded-2xl bg-gradient-to-b ${themeBg} border shadow-sm`}>
         <label className="text-xs font-bold uppercase tracking-wider text-slate-400 mb-1">
           {isExpense ? 'Valor da Despesa' : isTransfer ? 'Valor da Transferência' : 'Valor da Receita'}
@@ -208,7 +303,9 @@ export function TransactionForm({
         <div className="flex items-center text-3xl sm:text-4xl font-black text-slate-900">
           <span className="text-xl sm:text-2xl text-slate-400 mr-1.5 font-bold">R$</span>
           <input 
-            type="text" 
+            type="tel"
+            inputMode="numeric"
+            pattern="[0-9]*"
             name="amount"
             value={amount}
             onChange={handleAmountChange}
@@ -233,45 +330,37 @@ export function TransactionForm({
             required
             defaultValue={initialData?.description || ""}
             placeholder={isExpense ? "Ex: Aluguel Apartamento" : "Ex: Salário Mensal"}
-            className={`w-full px-3.5 py-2.5 rounded-xl border border-slate-200 bg-slate-50/50 text-slate-800 text-sm placeholder-slate-400 focus:outline-none focus:ring-2 transition-all ${focusRingClass}`}
+            className={`w-full px-3.5 py-2.5 rounded-xl border border-slate-200 bg-white text-slate-800 text-sm placeholder-slate-400 focus:outline-none focus:ring-2 transition-all shadow-2xs ${focusRingClass}`}
           />
         </div>
 
         {!isTransfer ? (
           <div className="group">
-            <label className="block text-xs font-bold text-slate-700 mb-1" htmlFor="category_id">
+            <label className="block text-xs font-bold text-slate-700 mb-1">
               Categoria
             </label>
-            <select
-              id="category_id"
+            <CustomSelect
               name="category_id"
+              value={categoryId}
+              onChange={setCategoryId}
+              placeholder="Selecione a categoria..."
               required={!isTransfer}
-              defaultValue={initialData?.category_id || ""}
-              className={`w-full px-3.5 py-2.5 rounded-xl border border-slate-200 bg-slate-50/50 text-slate-800 text-sm focus:outline-none focus:ring-2 transition-all ${focusRingClass}`}
-            >
-              <option value="">Selecione a categoria...</option>
-              {activeCategories.map(cat => (
-                <option key={cat.id} value={cat.id}>{cat.name}</option>
-              ))}
-            </select>
+              options={activeCategories.map(c => ({ id: c.id, label: c.name, icon: c.icon }))}
+            />
           </div>
         ) : (
           <div className="group">
-            <label className="block text-xs font-bold text-slate-700 mb-1" htmlFor="destination_account_id">
+            <label className="block text-xs font-bold text-slate-700 mb-1">
               Conta Destino
             </label>
-            <select
-              id="destination_account_id"
+            <CustomSelect
               name="destination_account_id"
+              value={destinationAccountId}
+              onChange={setDestinationAccountId}
+              placeholder="Selecione a conta..."
               required={isTransfer}
-              defaultValue={initialData?.destination_account_id || ""}
-              className={`w-full px-3.5 py-2.5 rounded-xl border border-slate-200 bg-slate-50/50 text-slate-800 text-sm focus:outline-none focus:ring-2 transition-all ${focusRingClass}`}
-            >
-              <option value="">Selecione a conta...</option>
-              {accounts.map(acc => (
-                <option key={acc.id} value={acc.id}>{acc.name}</option>
-              ))}
-            </select>
+              options={accounts.map(a => ({ id: a.id, label: a.name, icon: a.icon || '💳' }))}
+            />
           </div>
         )}
       </div>
@@ -279,21 +368,17 @@ export function TransactionForm({
       <div className={`grid grid-cols-1 ${!isPlanningMode ? 'sm:grid-cols-2' : ''} gap-3.5`}>
         {!isPlanningMode && (
           <div className="group">
-            <label className="block text-xs font-bold text-slate-700 mb-1" htmlFor="account_id">
+            <label className="block text-xs font-bold text-slate-700 mb-1">
               {isTransfer ? 'Conta de Origem' : 'Conta'}
             </label>
-            <select
-              id="account_id"
+            <CustomSelect
               name="account_id"
+              value={accountId}
+              onChange={setAccountId}
+              placeholder="Selecione a conta..."
               required
-              defaultValue={initialData?.account_id || defaultAccountId || ""}
-              className={`w-full px-3.5 py-2.5 rounded-xl border border-slate-200 bg-slate-50/50 text-slate-800 text-sm focus:outline-none focus:ring-2 transition-all ${focusRingClass}`}
-            >
-              <option value="">Selecione...</option>
-              {accounts.map(acc => (
-                <option key={acc.id} value={acc.id}>{acc.name}</option>
-              ))}
-            </select>
+              options={accounts.map(a => ({ id: a.id, label: a.name, icon: a.icon || '💳' }))}
+            />
           </div>
         )}
 
@@ -307,7 +392,7 @@ export function TransactionForm({
             type="date"
             required
             defaultValue={initialData?.date ? initialData.date.split('T')[0] : new Date().toISOString().split('T')[0]}
-            className={`w-full px-3.5 py-2.5 rounded-xl border border-slate-200 bg-slate-50/50 text-slate-800 text-sm focus:outline-none focus:ring-2 transition-all ${focusRingClass}`}
+            className={`w-full px-3.5 py-2.5 rounded-xl border border-slate-200 bg-white text-slate-800 text-sm focus:outline-none focus:ring-2 transition-all shadow-2xs ${focusRingClass}`}
           />
         </div>
       </div>
