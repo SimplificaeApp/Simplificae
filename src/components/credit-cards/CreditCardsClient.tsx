@@ -37,87 +37,118 @@ export function CreditCardsClient({ workspaceId, creditCards, allAccounts, categ
   const [barChartOffset, setBarChartOffset] = useState(0)
   const [chartDetailsModal, setChartDetailsModal] = useState<{ title: string, transactions: any[] } | null>(null)
 
+  const [selectedCategoryCardId, setSelectedCategoryCardId] = useState<string>('all')
+
   const barData = useMemo(() => {
-    if (!creditCards.length) return []
-    const data = []
+    if (!creditCards.length) return { months: [], seriesData: [] }
+    
+    const months: string[] = []
+    const cardsMap: Record<string, { card: any; values: number[] }> = {}
+
+    creditCards.forEach(c => {
+      cardsMap[c.id] = { card: c, values: [] }
+    })
+
     for (let i = barChartOffset - 5; i <= barChartOffset; i++) {
-      let total = 0
       let monthLabel = ''
-      const txsForMonth: any[] = []
-      
       for (const card of creditCards) {
         const inv = getInvoiceForOffset(card, transactions, i)
-        total += inv.total
-        txsForMonth.push(...inv.transactions)
-        
+        cardsMap[card.id].values.push(inv.total)
+
         if (!monthLabel) {
           const d = new Date()
           d.setMonth(d.getMonth() + i)
           monthLabel = new Intl.DateTimeFormat('pt-BR', { month: 'short' }).format(d)
         }
       }
-      data.push({
-        name: monthLabel.charAt(0).toUpperCase() + monthLabel.slice(1),
-        Total: total,
-        transactions: txsForMonth
-      })
+      months.push(monthLabel.charAt(0).toUpperCase() + monthLabel.slice(1))
     }
-    return data
+
+    const cardColors: Record<string, string> = {
+      'nubank': '#820ad1',
+      'picpay': '#10b981',
+      'xp': '#eab308',
+      'inter': '#f97316',
+      'bradesco': '#dc2626',
+      'itau': '#3b82f6'
+    }
+    const defaultPalette = ['#820ad1', '#10b981', '#f59e0b', '#3b82f6', '#ec4899', '#8b5cf6']
+
+    const seriesData = creditCards.map((card, idx) => {
+      const lowerName = card.name.toLowerCase()
+      let color = card.color
+      if (!color || color === '#000000' || color === '#000' || color === '#0f172a') {
+        const found = Object.keys(cardColors).find(k => lowerName.includes(k))
+        color = found ? cardColors[found] : defaultPalette[idx % defaultPalette.length]
+      }
+
+      return {
+        name: card.name,
+        type: 'bar',
+        data: cardsMap[card.id].values,
+        itemStyle: {
+          color,
+          borderRadius: [6, 6, 0, 0]
+        },
+        barMaxWidth: 32
+      }
+    })
+
+    return { months, seriesData }
   }, [creditCards, transactions, barChartOffset])
 
   const donutData = useMemo(() => {
     if (!creditCards.length) return []
-    const catMap = new Map<string, { name: string, value: number, color: string, transactions: any[] }>()
-    for (const card of creditCards) {
+    const catMap = new Map<string, { name: string, value: number, color: string, icon: string, transactions: any[] }>()
+
+    const targetCards = selectedCategoryCardId === 'all'
+      ? creditCards
+      : creditCards.filter(c => c.id === selectedCategoryCardId)
+
+    for (const card of targetCards) {
       const inv = getInvoiceForOffset(card, transactions, 0)
       for (const tx of inv.transactions) {
         if (tx.type === 'expense' && tx.account_id === card.id) {
           const catName = tx.category?.name || 'Sem Categoria'
           const catColor = tx.category?.color || '#94a3b8'
+          const catIcon = tx.category?.icon || '📦'
           const existing = catMap.get(catName)
           if (existing) {
             existing.value += Number(tx.amount)
             existing.transactions.push(tx)
           } else {
-            catMap.set(catName, { name: catName, value: Number(tx.amount), color: catColor, transactions: [tx] })
+            catMap.set(catName, { name: catName, value: Number(tx.amount), color: catColor, icon: catIcon, transactions: [tx] })
           }
         }
       }
     }
-    return Array.from(catMap.values()).sort((a,b) => b.value - a.value).slice(0,5)
-  }, [creditCards, transactions])
+    return Array.from(catMap.values()).sort((a, b) => b.value - a.value)
+  }, [creditCards, transactions, selectedCategoryCardId])
 
   const currencyFmt = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' })
 
   const barChartOption = useMemo(() => ({
-    grid: { top: 16, right: 16, bottom: 24, left: 0, containLabel: true },
+    grid: { top: 36, right: 16, bottom: 24, left: 0, containLabel: true },
     tooltip: {
       trigger: 'axis',
+      axisPointer: { type: 'shadow' },
       backgroundColor: 'rgba(255,255,255,0.97)',
       borderColor: '#e2e8f0',
       borderWidth: 1,
       borderRadius: 12,
       padding: [10, 14],
       textStyle: { color: '#334155', fontSize: 12, fontFamily: 'inherit' },
-      extraCssText: 'z-index: 40;',
-      formatter: (params: any[]) => {
-        const v = params[0]?.value || 0
-        return `<div style="font-size:11px;font-weight:700;color:#64748b;margin-bottom:4px">${params[0].axisValue}</div>` +
-          `<span style="color:#3b82f6;font-weight:900">${v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</span>`
-      }
+      extraCssText: 'z-index: 40;'
     },
-    xAxis: { type: 'category', data: barData.map((d: any) => d.name), axisLine: { show: false }, axisTick: { show: false }, axisLabel: { color: '#94a3b8', fontSize: 11, fontFamily: 'inherit' }, splitLine: { show: false } },
+    legend: {
+      show: true,
+      top: 0,
+      icon: 'circle',
+      textStyle: { color: '#64748b', fontSize: 11, fontWeight: 'bold' }
+    },
+    xAxis: { type: 'category', data: barData.months, axisLine: { show: false }, axisTick: { show: false }, axisLabel: { color: '#94a3b8', fontSize: 11, fontFamily: 'inherit' }, splitLine: { show: false } },
     yAxis: { type: 'value', axisLine: { show: false }, axisTick: { show: false }, axisLabel: { color: '#94a3b8', fontSize: 11, fontFamily: 'inherit', formatter: (v: number) => v >= 1000 ? `${(v/1000).toFixed(1)}k` : String(v) }, splitLine: { lineStyle: { color: '#f1f5f9', type: 'dashed' } } },
-    series: [{
-      name: 'Total', type: 'bar', data: barData.map((d: any) => ({
-        value: d.Total,
-        label: { show: false },
-        txs: d.transactions
-      })),
-      itemStyle: { color: { type: 'linear', x: 0, y: 0, x2: 0, y2: 1, colorStops: [{ offset: 0, color: '#3b82f6' }, { offset: 1, color: '#60a5fa' }] }, borderRadius: [6, 6, 0, 0] },
-      barMaxWidth: 48,
-      animationDuration: 1000, animationEasing: 'elasticOut'
-    }]
+    series: barData.seriesData
   }), [barData])
 
   const donutChartOption = useMemo(() => ({
@@ -131,18 +162,22 @@ export function CreditCardsClient({ workspaceId, creditCards, allAccounts, categ
       textStyle: { color: '#334155', fontSize: 12, fontFamily: 'inherit' },
       extraCssText: 'z-index: 40;',
       formatter: (p: any) => {
-        return `<div style="display:flex;align-items:center;gap:8px;margin-bottom:4px"><span style="width:10px;height:10px;border-radius:50%;background:${p.color};display:inline-block"></span><span style="font-weight:700;color:#334155">${p.name}</span></div>` +
+        return `<div style="display:flex;align-items:center;gap:8px;margin-bottom:4px"><span style="width:10px;height:10px;border-radius:50%;background:${p.color};display:inline-block"></span><span style="font-weight:700;color:#334155">${p.data.icon || ''} ${p.name}</span></div>` +
           `<div style="font-size:15px;font-weight:900;color:#0f172a">${p.value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</div>` +
           `<div style="font-size:10px;color:#94a3b8;margin-top:2px">${p.percent.toFixed(1)}% do total</div>`
       }
     },
-    legend: { type: 'scroll', orient: 'horizontal', bottom: 0, textStyle: { color: '#64748b', fontSize: 11, fontFamily: 'inherit' }, icon: 'circle', itemWidth: 8, itemHeight: 8 },
     series: [{
-      type: 'pie', radius: ['48%', '72%'], center: ['50%', '44%'],
-      padAngle: 4, itemStyle: { borderRadius: 6 },
-      label: { show: false },
+      type: 'pie', radius: ['48%', '75%'], center: ['50%', '44%'],
+      padAngle: 3, itemStyle: { borderRadius: 6 },
+      label: {
+        show: true,
+        position: 'inside',
+        formatter: (params: any) => (params.percent >= 5 ? params.data.icon : ''),
+        fontSize: 14
+      },
       emphasis: { scale: true, scaleSize: 8, itemStyle: { shadowBlur: 16, shadowOffsetY: 6, shadowColor: 'rgba(0,0,0,0.15)' } },
-      data: donutData.map((d: any) => ({ name: d.name, value: d.value, itemStyle: { color: d.color } })),
+      data: donutData.map((d: any) => ({ name: d.name, value: d.value, icon: d.icon, itemStyle: { color: d.color } })),
       animationType: 'expansion', animationDuration: 1000, animationEasing: 'cubicOut'
     }]
   }), [donutData])
@@ -158,18 +193,17 @@ export function CreditCardsClient({ workspaceId, creditCards, allAccounts, categ
   }
 
   const handleOpenDetails = (card: any) => {
-    const calc = calculateCardBalances(card, transactions)
-    setSelectedCard({ ...card, calc })
+    setSelectedCard(card)
     setIsDetailsOpen(true)
   }
 
-  const handleOpenTransaction = () => {
-    setIsDetailsOpen(false)
+  const handleOpenTransaction = (card: any) => {
+    setSelectedCard(card)
     setIsTransactionOpen(true)
   }
 
-  const handleOpenPayInvoice = () => {
-    setIsDetailsOpen(false)
+  const handleOpenPayInvoice = (card: any) => {
+    setSelectedCard(card)
     setIsPayInvoiceOpen(true)
   }
 
@@ -179,21 +213,20 @@ export function CreditCardsClient({ workspaceId, creditCards, allAccounts, categ
   }
 
   const fadeUp = {
-    initial: { opacity: 0, y: 16 },
+    initial: { opacity: 0, y: 15 },
     animate: { opacity: 1, y: 0 },
-    exit: { opacity: 0, y: -16 }
+    transition: { duration: 0.3 }
   }
 
   return (
     <>
-      <div className="flex flex-wrap items-center justify-between gap-4 mb-8">
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-8 gap-4">
         <div>
-          <h1 className="text-2xl font-black text-slate-800">Meus Cartões</h1>
-          <p className="text-slate-500">Gerencie seus cartões de crédito e faturas</p>
+          <h1 className="text-2xl font-black text-slate-900">Meus Cartões</h1>
+          <p className="text-sm text-slate-500 mt-1">Gerencie seus cartões de crédito e faturas</p>
         </div>
-        
         <motion.button
-          whileHover={{ scale: 1.02, y: -1 }}
+          whileHover={{ scale: 1.02 }}
           whileTap={{ scale: 0.98 }}
           onClick={handleOpenNew}
           className="bg-slate-900 hover:bg-slate-800 text-white px-5 py-2.5 rounded-xl font-bold flex items-center gap-2 transition-all shadow-sm"
@@ -233,35 +266,80 @@ export function CreditCardsClient({ workspaceId, creditCards, allAccounts, categ
               <ReactECharts 
                 option={barChartOption} 
                 style={{ height: '100%', width: '100%' }}
-                onEvents={{
-                  click: (params: any) => {
-                    const txs = params.data?.txs || []
-                    setChartDetailsModal({ title: `Faturas de ${params.name}`, transactions: txs })
-                  }
-                }}
               />
             </div>
           </motion.div>
 
           <motion.div {...fadeUp} transition={{ delay: 0.1 }} className="glass-panel p-6 rounded-2xl flex flex-col">
-            <h3 className="font-bold text-slate-800 mb-6">Gastos por Categoria (Fatura Atual)</h3>
-            <div className="h-64 md:h-72 w-full">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-6 gap-2">
+              <h3 className="font-bold text-slate-800">Gastos por Categoria (Fatura Atual)</h3>
+              <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl shrink-0 self-start sm:self-auto">
+                <button
+                  onClick={() => setSelectedCategoryCardId('all')}
+                  className={`px-2.5 py-1 text-[11px] font-bold rounded-lg transition-all ${
+                    selectedCategoryCardId === 'all' ? 'bg-white text-slate-800 shadow-xs' : 'text-slate-500 hover:text-slate-700'
+                  }`}
+                >
+                  Todos
+                </button>
+                {creditCards.map(c => (
+                  <button
+                    key={c.id}
+                    onClick={() => setSelectedCategoryCardId(c.id)}
+                    className={`px-2.5 py-1 text-[11px] font-bold rounded-lg transition-all ${
+                      selectedCategoryCardId === c.id ? 'bg-white text-slate-800 shadow-xs' : 'text-slate-500 hover:text-slate-700'
+                    }`}
+                  >
+                    {c.name}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="w-full">
               {donutData.length > 0 ? (
-                <div className="h-64 md:h-72 w-full">
-                  <ReactECharts 
-                    option={donutChartOption} 
-                    style={{ height: '100%', width: '100%' }}
-                    onEvents={{
-                      click: (params: any) => {
-                        const entry = donutData.find((d: any) => d.name === params.name)
-                        if (entry) setChartDetailsModal({ title: `Gastos: ${entry.name}`, transactions: entry.transactions || [] })
-                      }
-                    }}
-                  />
-                </div>
+                <>
+                  <div className="h-56 md:h-64 w-full">
+                    <ReactECharts 
+                      option={donutChartOption} 
+                      style={{ height: '100%', width: '100%' }}
+                      onEvents={{
+                        click: (params: any) => {
+                          const entry = donutData.find((d: any) => d.name === params.name)
+                          if (entry) setChartDetailsModal({ title: `Gastos: ${entry.name}`, transactions: entry.transactions || [] })
+                        }
+                      }}
+                    />
+                  </div>
+
+                  {/* Legenda de Categorias Detalhada */}
+                  <div className="mt-2 pt-3 border-t border-slate-100 grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    {donutData.map(cat => {
+                      const totalVal = donutData.reduce((acc, c) => acc + c.value, 0)
+                      const pct = totalVal > 0 ? ((cat.value / totalVal) * 100).toFixed(1) : '0'
+                      return (
+                        <div 
+                          key={cat.name} 
+                          onClick={() => setChartDetailsModal({ title: `Gastos: ${cat.name}`, transactions: cat.transactions })}
+                          className="flex items-center justify-between p-2 rounded-xl bg-slate-50/70 hover:bg-slate-100/80 cursor-pointer transition-all border border-slate-100/80"
+                        >
+                          <div className="flex items-center gap-2 min-w-0">
+                            <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: cat.color }} />
+                            <span className="text-xs shrink-0">{cat.icon}</span>
+                            <span className="text-xs font-bold text-slate-700 truncate">{cat.name}</span>
+                          </div>
+                          <div className="flex items-center gap-1.5 shrink-0">
+                            <span className="text-xs font-black text-slate-900 tabular-nums">{currencyFmt.format(cat.value)}</span>
+                            <span className="text-[10px] font-bold text-slate-500 bg-white px-1.5 py-0.5 rounded-md border border-slate-200">{pct}%</span>
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+                </>
               ) : (
-                <div className="h-full flex items-center justify-center text-slate-400 text-sm">
-                  Nenhum gasto na fatura atual.
+                <div className="h-56 flex flex-col items-center justify-center text-slate-400 text-sm">
+                  <span>Nenhum gasto na fatura atual</span>
                 </div>
               )}
             </div>
