@@ -349,7 +349,7 @@ export function PlannedClient({
         }
       ]
     }
-  }, [categories, spentPerCategory])
+  }, [categories, filteredSpentPerCategory])
 
 
   // Chart Options - ECharts Donut Chart (Distribuição por Categoria Real com Ícones nas Fatias)
@@ -407,6 +407,33 @@ export function PlannedClient({
 
   // Chart Options - ECharts Bar Chart (Planejado vs Realizado)
   const barChartOption = useMemo(() => {
+    let categoriesList = ['Receitas', 'Fixos', 'Variáveis', 'Aportes']
+    let plannedData = [
+      metrics.plannedIncome,
+      metrics.plannedFixed,
+      metrics.plannedVariable,
+      metrics.plannedInvestments
+    ]
+    let spentData = [
+      metrics.realizedIncome,
+      metrics.spentFixed,
+      metrics.spentVariable,
+      metrics.spentInvestments
+    ]
+    let colorsList = ['#10b981', '#f43f5e', '#f59e0b', '#a855f7']
+
+    if (chartCostFilter === 'fixed') {
+      categoriesList = ['Receitas', 'Fixos']
+      plannedData = [metrics.plannedIncome, metrics.plannedFixed]
+      spentData = [metrics.realizedIncome, metrics.spentFixed]
+      colorsList = ['#10b981', '#f43f5e']
+    } else if (chartCostFilter === 'variable') {
+      categoriesList = ['Receitas', 'Variáveis']
+      plannedData = [metrics.plannedIncome, metrics.plannedVariable]
+      spentData = [metrics.realizedIncome, metrics.spentVariable]
+      colorsList = ['#10b981', '#f59e0b']
+    }
+
     return {
       tooltip: {
         trigger: 'axis',
@@ -440,7 +467,7 @@ export function PlannedClient({
       grid: { left: '3%', right: '3%', bottom: '5%', top: '18%', containLabel: true },
       xAxis: {
         type: 'category',
-        data: ['Receitas', 'Fixos', 'Variáveis', 'Aportes'],
+        data: categoriesList,
         axisLine: { lineStyle: { color: '#cbd5e1' } },
         axisLabel: { color: '#64748b', fontSize: 10, fontWeight: 'bold' }
       },
@@ -461,33 +488,20 @@ export function PlannedClient({
           type: 'bar',
           barGap: 0,
           itemStyle: { color: '#cbd5e1', borderRadius: [4, 4, 0, 0] },
-          data: [
-            metrics.plannedIncome,
-            metrics.plannedFixed,
-            metrics.plannedVariable,
-            metrics.plannedInvestments
-          ]
+          data: plannedData
         },
         {
           name: 'Gasto',
           type: 'bar',
           itemStyle: {
-            color: (params: any) => {
-              const colors = ['#10b981', '#f43f5e', '#f59e0b', '#a855f7']
-              return colors[params.dataIndex]
-            },
+            color: (params: any) => colorsList[params.dataIndex % colorsList.length],
             borderRadius: [4, 4, 0, 0]
           },
-          data: [
-            metrics.realizedIncome,
-            metrics.spentFixed,
-            metrics.spentVariable,
-            metrics.spentInvestments
-          ]
+          data: spentData
         }
       ]
     }
-  }, [metrics])
+  }, [metrics, chartCostFilter])
 
   // Chart Options - ECharts Radar (Raio-X de Saúde Financeira)
   const radarChartOption = useMemo(() => {
@@ -496,6 +510,20 @@ export function PlannedClient({
     const varPct = Math.min(100, Math.round((metrics.spentVariable / inc) * 100))
     const invPct = Math.min(100, Math.round((metrics.spentInvestments / inc) * 100))
     const freePct = Math.max(0, Math.min(100, Math.round((metrics.remainingBalance / inc) * 100)))
+
+    let indicatorList = [
+      { name: 'Fixos (≤50%)', max: 100 },
+      { name: 'Variáveis (≤30%)', max: 100 },
+      { name: 'Aportes (≥15%)', max: 100 },
+      { name: 'Saldo Livre (≥10%)', max: 100 }
+    ]
+    let valueList = [fixPct, varPct, invPct, freePct]
+
+    if (chartCostFilter === 'fixed') {
+      valueList = [fixPct, 0, 0, freePct]
+    } else if (chartCostFilter === 'variable') {
+      valueList = [0, varPct, 0, freePct]
+    }
 
     return {
       tooltip: {
@@ -513,12 +541,7 @@ export function PlannedClient({
         }
       },
       radar: {
-        indicator: [
-          { name: 'Fixos (≤50%)', max: 100 },
-          { name: 'Variáveis (≤30%)', max: 100 },
-          { name: 'Aportes (≥15%)', max: 100 },
-          { name: 'Saldo Livre (≥10%)', max: 100 }
-        ],
+        indicator: indicatorList,
         radius: '65%',
         shape: 'polygon',
         axisName: { color: '#475569', fontSize: 10, fontWeight: 'bold' },
@@ -531,7 +554,7 @@ export function PlannedClient({
           type: 'radar',
           data: [
             {
-              value: [fixPct, varPct, invPct, freePct],
+              value: valueList,
               name: 'Seu Orçamento',
               areaStyle: { color: 'rgba(16, 185, 129, 0.25)' },
               lineStyle: { color: '#10b981', width: 2 },
@@ -541,7 +564,7 @@ export function PlannedClient({
         }
       ]
     }
-  }, [metrics])
+  }, [metrics, chartCostFilter])
 
   // Filter pending transactions for the list
   const pendingTransactions = useMemo(() => {
@@ -624,10 +647,37 @@ export function PlannedClient({
     return { kpiCreditCardGroups: Object.values(groups), kpiStandardTransactions: standard }
   }, [kpiModalTransactions, creditCardAccountsMap])
 
-  // Lista unificada de Contas Fixas e Recorrentes
+  // Lista unificada de Contas Fixas e Recorrentes do Mês Selecionado (Idêntica ao card de Custos Fixos)
   const fixedBillsList = useMemo(() => {
     const fixedCategoryIds = new Set(fixedCategories.map(c => c.id))
-    const map: Record<string, {
+    const investmentCategoryIds = new Set(investmentCategories.map(c => c.id))
+
+    const getBillKey = (t: Transaction) => {
+      const dayOfMonth = new Date(t.date + 'T12:00:00').getDate()
+      return `${t.description.toLowerCase().trim()}_${t.category_id || 'no_cat'}_d${dayOfMonth}_${t.account_id || 'no_acc'}`
+    }
+
+    // 1. Mapear séries de contas fixas para obter metadados de início e fim
+    const seriesMap: Record<string, { startDate: string; endDate: string; occurrences: number }> = {}
+
+    transactions.forEach(t => {
+      if (t.ignore_in_cashflow || t.type !== 'expense') return
+      if (t.category_id && investmentCategoryIds.has(t.category_id)) return
+      const isCatFix = Boolean(t.category_id && fixedCategoryIds.has(t.category_id))
+      const isRec = Boolean(t.is_recurring)
+      if (!isCatFix && !isRec) return
+
+      const key = getBillKey(t)
+      if (!seriesMap[key]) {
+        seriesMap[key] = { startDate: t.date, endDate: t.date, occurrences: 0 }
+      }
+      seriesMap[key].occurrences += 1
+      if (t.date < seriesMap[key].startDate) seriesMap[key].startDate = t.date
+      if (t.date > seriesMap[key].endDate) seriesMap[key].endDate = t.date
+    })
+
+    // 2. Obter as contas fixas do ciclo atual (idêntico ao card de Custos Fixos)
+    const list: {
       id: string
       description: string
       amount: number
@@ -638,41 +688,36 @@ export function PlannedClient({
       endDate: string
       lastTransaction: Transaction
       isCategoryFixed: boolean
-    }> = {}
+      isRecurring: boolean
+    }[] = []
 
-    transactions.forEach(t => {
-      if (t.ignore_in_cashflow) return
-      if (t.type !== 'expense') return
+    cycleTransactions.forEach(t => {
+      if (t.ignore_in_cashflow || t.type !== 'expense') return
+      if (t.category_id && investmentCategoryIds.has(t.category_id)) return
       const isCatFix = Boolean(t.category_id && fixedCategoryIds.has(t.category_id))
       const isRec = Boolean(t.is_recurring)
       if (!isCatFix && !isRec) return
 
-      const key = `${t.description.toLowerCase().trim()}_${t.category_id || 'no_cat'}`
-      if (!map[key]) {
-        map[key] = {
-          id: t.id,
-          description: t.description,
-          amount: Number(t.amount),
-          category: t.category || null,
-          account: t.account || null,
-          occurrences: 0,
-          startDate: t.date,
-          endDate: t.date,
-          lastTransaction: t,
-          isCategoryFixed: isCatFix
-        }
-      }
+      const key = getBillKey(t)
+      const series = seriesMap[key] || { startDate: t.date, endDate: t.date, occurrences: 1 }
 
-      map[key].occurrences += 1
-      if (t.date < map[key].startDate) map[key].startDate = t.date
-      if (t.date > map[key].endDate) {
-        map[key].endDate = t.date
-        map[key].lastTransaction = t
-      }
+      list.push({
+        id: t.id,
+        description: t.description,
+        amount: Number(t.amount),
+        category: t.category || null,
+        account: t.account || null,
+        occurrences: series.occurrences,
+        startDate: series.startDate,
+        endDate: series.endDate,
+        lastTransaction: t,
+        isCategoryFixed: isCatFix,
+        isRecurring: isRec
+      })
     })
 
-    return Object.values(map).sort((a, b) => b.amount - a.amount)
-  }, [transactions, fixedCategories])
+    return list.sort((a, b) => b.amount - a.amount)
+  }, [transactions, cycleTransactions, fixedCategories, investmentCategories])
 
   const totalFixedMonthly = useMemo(() => {
     return fixedBillsList.reduce((acc, item) => acc + item.amount, 0)
@@ -1148,6 +1193,7 @@ export function PlannedClient({
               {fixedBillsList.map(bill => {
                 const startObj = new Date(bill.startDate + 'T12:00:00')
                 const endObj = new Date(bill.endDate + 'T12:00:00')
+                const monthSpan = (endObj.getFullYear() - startObj.getFullYear()) * 12 + (endObj.getMonth() - startObj.getMonth()) + 1
 
                 return (
                   <div
@@ -1195,7 +1241,11 @@ export function PlannedClient({
                       <div className="flex justify-between items-center">
                         <span className="text-slate-400">Frequência:</span>
                         <span className="font-semibold text-rose-700 bg-rose-50 px-1.5 py-0.5 rounded-md">
-                          {bill.occurrences > 1 ? `Programado para ${bill.occurrences} meses` : 'Mensal Contínuo'}
+                          {bill.isRecurring && monthSpan > 1
+                            ? `Recorrente (${monthSpan} meses)`
+                            : bill.isRecurring
+                            ? 'Mensal Recorrente'
+                            : 'Custo Fixo Mensal'}
                         </span>
                       </div>
                     </div>

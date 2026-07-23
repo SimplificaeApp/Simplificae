@@ -13,13 +13,21 @@ export async function GET(request: Request) {
     // Tenta primeiro o fluxo PKCE padrão
     let { error } = await supabase.auth.exchangeCodeForSession(code)
     
-    // Se falhar (ex: token foi passado no lugar do code), usa o verifyOtp
+    // Se falhar, tenta verifyOtp para signup ou recovery
     if (error) {
-      const { error: otpError } = await supabase.auth.verifyOtp({
+      const { error: recoveryError } = await supabase.auth.verifyOtp({
         token_hash: code,
-        type: 'signup'
+        type: 'recovery'
       })
-      error = otpError
+      if (!recoveryError) {
+        error = null
+      } else {
+        const { error: signupError } = await supabase.auth.verifyOtp({
+          token_hash: code,
+          type: 'signup'
+        })
+        error = signupError
+      }
     }
     
     if (!error) {

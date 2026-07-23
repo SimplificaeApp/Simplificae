@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useActionState, useEffect, startTransition } from 'react'
+import { useState, useActionState, useEffect, startTransition, useRef } from 'react'
 import { toast } from 'sonner'
 import { useRouter } from 'next/navigation'
 import { createTransaction, updateTransaction, deleteTransaction } from '@/app/actions/transactions'
@@ -19,7 +19,8 @@ import {
   Minus,
   CheckCircle,
   ChevronDown,
-  Check
+  Check,
+  X
 } from 'lucide-react'
 import { motion, AnimatePresence } from 'framer-motion'
 
@@ -151,6 +152,7 @@ export function TransactionForm({
   isPlanningMode,
   initialData
 }: TransactionFormProps) {
+  const formRef = useRef<HTMLFormElement>(null)
   const actionToUse = initialData ? updateTransaction.bind(null, initialData.id) : createTransaction
   const [state, formAction, pending] = useActionState(actionToUse, initialState)
   
@@ -171,6 +173,10 @@ export function TransactionForm({
   const [installments, setInstallments] = useState(2)
   const [recurringMonths, setRecurringMonths] = useState(12)
   const [isIndefinite, setIsIndefinite] = useState(true)
+
+  const [updateScope, setUpdateScope] = useState<'single' | 'future'>('single')
+  const [scopeModalMode, setScopeModalMode] = useState<'edit' | 'delete' | null>(null)
+  const [isConfirmedSubmit, setIsConfirmedSubmit] = useState(false)
 
   const [isDeleting, setIsDeleting] = useState(false)
   const router = useRouter()
@@ -202,25 +208,33 @@ export function TransactionForm({
     const isRecurringOrInstallment = initialData.is_recurring || initialData.installment_id
 
     if (isRecurringOrInstallment) {
-      toast('Este é um lançamento recorrente/parcelado. Como deseja excluir?', {
-        action: {
-          label: 'Apenas este',
-          onClick: () => executeDelete('single')
-        },
-        cancel: {
-          label: 'Este e os próximos',
-          onClick: () => executeDelete('future')
-        }
-      })
+      setScopeModalMode('delete')
     } else {
-      toast('Tem certeza que deseja excluir este lançamento?', {
-        action: {
-          label: 'Sim, excluir',
-          onClick: () => executeDelete('single')
-        },
-        cancel: { label: 'Cancelar', onClick: () => {} }
-      })
+      executeDelete('single')
     }
+  }
+
+  const handleFormSubmit = (e: React.FormEvent<HTMLFormElement>) => {
+    if (initialData && (initialData.is_recurring || initialData.installment_id) && !isConfirmedSubmit) {
+      e.preventDefault()
+      setScopeModalMode('edit')
+    } else {
+      setIsConfirmedSubmit(false)
+    }
+  }
+
+  const handleConfirmEditScope = (scope: 'single' | 'future') => {
+    setUpdateScope(scope)
+    setScopeModalMode(null)
+    setIsConfirmedSubmit(true)
+    setTimeout(() => {
+      formRef.current?.requestSubmit()
+    }, 50)
+  }
+
+  const handleConfirmDeleteScope = (scope: 'single' | 'future') => {
+    setScopeModalMode(null)
+    executeDelete(scope)
   }
 
   const handleAmountChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -251,10 +265,11 @@ export function TransactionForm({
   }
 
   return (
-    <form action={formAction} className="flex flex-col gap-4">
+    <form ref={formRef} onSubmit={handleFormSubmit} action={formAction} className="flex flex-col gap-4">
       <input type="hidden" name="workspace_id" value={workspaceId} />
       <input type="hidden" name="type" value={type} />
       <input type="hidden" name="status" value={isPlanningMode ? 'pending' : (isPlanned ? 'pending' : 'posted')} />
+      <input type="hidden" name="update_scope" value={updateScope} />
 
       {/* Hidden inputs based on freqMode */}
       <input 
@@ -591,6 +606,65 @@ export function TransactionForm({
           )}
         </motion.button>
       </div>
+
+      {/* Modal de Escolha de Escopo (Edição / Exclusão de Recorrentes) */}
+      <AnimatePresence>
+        {scopeModalMode && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-xs">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="bg-white border border-slate-200 rounded-2xl p-5 max-w-sm w-full shadow-2xl flex flex-col gap-4 relative"
+            >
+              {/* Header com botão X para fechar */}
+              <div className="flex items-center justify-between pb-2 border-b border-slate-100">
+                <h3 className="font-extrabold text-sm sm:text-base text-slate-800">
+                  {scopeModalMode === 'edit' ? 'Editar lançamento' : 'Excluir lançamento'}
+                </h3>
+                <button
+                  type="button"
+                  onClick={() => setScopeModalMode(null)}
+                  className="p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-colors"
+                  title="Fechar"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              <p className="text-xs text-slate-600 leading-relaxed">
+                Este lançamento faz parte de uma série recorrente ou parcelada. Como você deseja aplicar esta {scopeModalMode === 'edit' ? 'alteração' : 'exclusão'}?
+              </p>
+
+              <div className="flex flex-col gap-2 pt-1">
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (scopeModalMode === 'edit') handleConfirmEditScope('single')
+                    else handleConfirmDeleteScope('single')
+                  }}
+                  className="w-full py-2.5 px-4 bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs font-bold rounded-xl transition-all flex items-center justify-center gap-2 active:scale-95"
+                >
+                  📌 Apenas este lançamento
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (scopeModalMode === 'edit') handleConfirmEditScope('future')
+                    else handleConfirmDeleteScope('future')
+                  }}
+                  className={`w-full py-2.5 px-4 text-xs font-bold rounded-xl transition-all flex items-center justify-center gap-2 text-white active:scale-95 ${
+                    scopeModalMode === 'delete' ? 'bg-rose-600 hover:bg-rose-700' : 'bg-emerald-600 hover:bg-emerald-700'
+                  }`}
+                >
+                  🔁 Este e os próximos
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </form>
   )
 }

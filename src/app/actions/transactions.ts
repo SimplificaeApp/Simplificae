@@ -361,6 +361,8 @@ export async function updateTransaction(id: string, prevState: any, formData: Fo
     return { error: 'Valor inválido.' }
   }
 
+  const updateScope = (formData.get('update_scope') as string) || 'single'
+
   const baseData: any = {
     account_id: formData.get('account_id') as string,
     type: formData.get('type') as string,
@@ -419,9 +421,37 @@ export async function updateTransaction(id: string, prevState: any, formData: Fo
     }
   }
 
-  // 5. Update Transaction
+  // 5. Update Current Transaction
   const { error } = await supabase.from('transactions').update(baseData).eq('id', id)
   if (error) return { error: 'Erro ao atualizar transação.' }
+
+  // 6. Update Future Transactions if requested
+  if (updateScope === 'future' && (oldTx.is_recurring || oldTx.installment_id)) {
+    const futureData: any = {
+      description: baseData.description,
+      amount: baseData.amount,
+      type: baseData.type,
+      category_id: baseData.category_id,
+      account_id: baseData.account_id,
+      destination_account_id: baseData.destination_account_id,
+      ignore_in_cashflow: baseData.ignore_in_cashflow,
+    }
+
+    let futureQuery = supabase
+      .from('transactions')
+      .update(futureData)
+      .eq('workspace_id', oldTx.workspace_id)
+      .gt('date', oldTx.date)
+
+    if (oldTx.installment_id) {
+      futureQuery = futureQuery.eq('installment_id', oldTx.installment_id)
+    } else {
+      futureQuery = futureQuery.eq('description', oldTx.description)
+      if (oldTx.category_id) futureQuery = futureQuery.eq('category_id', oldTx.category_id)
+    }
+
+    await futureQuery
+  }
 
   revalidatePath('/')
   revalidatePath('/planned')
