@@ -145,11 +145,7 @@ export async function createTransaction(prevState: any, formData: FormData) {
     }
   }
 
-  revalidatePath('/')
-  revalidatePath('/planned')
-  revalidatePath('/transactions')
-  revalidatePath('/credit-cards')
-  revalidatePath('/accounts')
+  revalidatePath('/', 'layout')
   return { success: 'Transação salva com sucesso!' }
 }
 
@@ -226,11 +222,7 @@ export async function deleteTransaction(id: string, scope: 'single' | 'future' =
     if (error) return { error: 'Erro ao excluir transação.' }
   }
 
-  revalidatePath('/')
-  revalidatePath('/planned')
-  revalidatePath('/transactions')
-  revalidatePath('/credit-cards')
-  revalidatePath('/accounts')
+  revalidatePath('/', 'layout')
   return { success: 'Transação excluída com sucesso!' }
 }
 
@@ -290,11 +282,7 @@ export async function payTransactionNew(id: string) {
     }
   }
 
-  revalidatePath('/')
-  revalidatePath('/planned')
-  revalidatePath('/transactions')
-  revalidatePath('/credit-cards')
-  revalidatePath('/accounts')
+  revalidatePath('/', 'layout')
   console.error("SERVER ACTION: payTransactionNew SUCCESS");
   return { success: 'Transação marcada como paga!' }
 }
@@ -338,11 +326,8 @@ export async function unpayTransaction(id: string) {
       .eq('id', tx.account_id)
   }
 
-  revalidatePath('/')
-  revalidatePath('/planned')
-  revalidatePath('/transactions')
-  revalidatePath('/credit-cards')
-  revalidatePath('/accounts')
+  revalidatePath('/', 'layout')
+  return { success: 'Transação desmarcada!' }
   return { success: 'Lançamento desmarcado com sucesso!' }
 }
 
@@ -453,11 +438,7 @@ export async function updateTransaction(id: string, prevState: any, formData: Fo
     await futureQuery
   }
 
-  revalidatePath('/')
-  revalidatePath('/planned')
-  revalidatePath('/transactions')
-  revalidatePath('/credit-cards')
-  revalidatePath('/accounts')
+  revalidatePath('/', 'layout')
   return { success: 'Transação atualizada!' }
 }
 
@@ -496,10 +477,6 @@ export async function markAsPosted(id: string) {
   const { error } = await supabase.from('transactions').update({ status: 'posted' }).eq('id', id)
   if (error) return { error: 'Erro ao confirmar transação.' }
 
-  revalidatePath('/')
-  revalidatePath('/planned')
-  revalidatePath('/transactions')
-  revalidatePath('/credit-cards')
-  revalidatePath('/accounts')
+  revalidatePath('/', 'layout')
   return { success: 'Transação confirmada!' }
 }

@@ -110,6 +110,11 @@ export function PlannedClient({
   const [kpiModal, setKpiModal] = useState<{ title: string; type: 'income' | 'fixed' | 'variable' | 'investments' } | null>(null)
   const [chartCostFilter, setChartCostFilter] = useState<'all' | 'fixed' | 'variable'>('all')
   const [showAllVariableCategories, setShowAllVariableCategories] = useState(false)
+  const [localTransactions, setLocalTransactions] = useState(transactions)
+
+  useEffect(() => {
+    setLocalTransactions(transactions)
+  }, [transactions])
 
   const [isPending, startTransition] = useTransition()
 
@@ -161,7 +166,7 @@ export function PlannedClient({
 
   // Filter transactions within the selected cycle period, sorted from most recent to oldest
   const cycleTransactions = useMemo(() => {
-    return transactions
+    return localTransactions
       .filter(t => {
         if (t.ignore_in_cashflow) return false
 
@@ -178,7 +183,7 @@ export function PlannedClient({
         return txEffectiveDate >= cyclePeriod.startDate && txEffectiveDate <= cyclePeriod.endDate
       })
       .sort((a, b) => new Date(b.date + 'T12:00:00').getTime() - new Date(a.date + 'T12:00:00').getTime())
-  }, [transactions, cyclePeriod, accountsMap])
+  }, [localTransactions, cyclePeriod, accountsMap])
 
   // Split categories
   const incomeCategories = useMemo(() => categories.filter(c => c.type === 'income'), [categories])
@@ -817,22 +822,42 @@ export function PlannedClient({
   }
 
   const handlePay = (id: string) => {
+    // ⚡ Optimistic update: Immediate UI response in 0ms
+    setLocalTransactions(prev => prev.map(t => t.id === id ? { ...t, status: 'paid_planned' } : t))
+
     startTransition(async () => {
       try {
         const res = await payTransactionNew(id)
-        if (res?.error) toast.error(res.error)
-        else toast.success(res.success)
+        if (res?.error) {
+          toast.error(res.error)
+          setLocalTransactions(transactions) // Revert on failure
+        } else {
+          toast.success(res.success)
+        }
       } catch (err) {
         toast.error("Erro ao processar pagamento.")
+        setLocalTransactions(transactions)
       }
     })
   }
 
   const handleUnpay = (id: string) => {
+    // ⚡ Optimistic update: Immediate UI response in 0ms
+    setLocalTransactions(prev => prev.map(t => t.id === id ? { ...t, status: 'planned' } : t))
+
     startTransition(async () => {
-      const res = await unpayTransaction(id)
-      if (res?.error) toast.error(res.error)
-      else toast.success(res.success)
+      try {
+        const res = await unpayTransaction(id)
+        if (res?.error) {
+          toast.error(res.error)
+          setLocalTransactions(transactions) // Revert on failure
+        } else {
+          toast.success(res.success)
+        }
+      } catch (err) {
+        toast.error("Erro ao desmarcar pagamento.")
+        setLocalTransactions(transactions)
+      }
     })
   }
 
