@@ -109,6 +109,7 @@ export function PlannedClient({
   const [tempTurnoverDay, setTempTurnoverDay] = useState(workspace?.month_turnover_day || 1)
   const [kpiModal, setKpiModal] = useState<{ title: string; type: 'income' | 'fixed' | 'variable' | 'investments' } | null>(null)
   const [chartCostFilter, setChartCostFilter] = useState<'all' | 'fixed' | 'variable'>('all')
+  const [showAllVariableCategories, setShowAllVariableCategories] = useState(false)
 
   const [isPending, startTransition] = useTransition()
 
@@ -185,7 +186,7 @@ export function PlannedClient({
   const variableCategories = useMemo(() => categories.filter(c => c.type === 'expense' && !c.is_fixed && !c.is_investment), [categories])
   const investmentCategories = useMemo(() => categories.filter(c => c.is_investment), [categories])
 
-  // Calculate actual spending per category in this cycle
+  // Calculate actual total and confirmed spending per category in this cycle
   const spentPerCategory = useMemo(() => {
     const map: Record<string, number> = {}
     cycleTransactions.forEach(t => {
@@ -196,59 +197,120 @@ export function PlannedClient({
     return map
   }, [cycleTransactions])
 
+  // Active variable categories (categories with budget set or spent in cycle)
+  const activeVariableCategories = useMemo(() => {
+    return variableCategories.filter(c => Number(c.budget_amount || 0) > 0 || Boolean(spentPerCategory[c.id]))
+  }, [variableCategories, spentPerCategory])
+
+  const displayedVariableCategories = useMemo(() => {
+    if (showAllVariableCategories) return variableCategories
+    if (activeVariableCategories.length > 0) return activeVariableCategories
+    return variableCategories
+  }, [showAllVariableCategories, activeVariableCategories, variableCategories])
+
+  const confirmedPerCategory = useMemo(() => {
+    const map: Record<string, number> = {}
+    cycleTransactions.forEach(t => {
+      if (t.category_id) {
+        const acc = t.account_id ? accountsMap[t.account_id] : (t.account || null)
+        const isCreditCard = Boolean(acc && acc.type === 'credit_card')
+        const isConfirmed = isCreditCard ? t.status === 'paid_planned' : (t.status === 'paid_planned' || t.status === 'posted')
+        if (isConfirmed) {
+          map[t.category_id] = (map[t.category_id] || 0) + Number(t.amount)
+        }
+      }
+    })
+    return map
+  }, [cycleTransactions, accountsMap])
+
   // Metrics
   const metrics = useMemo(() => {
-    const plannedIncome = incomeCategories.reduce((acc, c) => acc + Number(c.budget_amount || 0), 0)
-    const realizedIncome = cycleTransactions
-      .filter(t => t.type === 'income')
-      .reduce((acc, t) => acc + Number(t.amount), 0)
+    const plannedIncomeBase = incomeCategories.reduce((acc, c) => acc + Number(c.budget_amount || 0), 0)
+
+    let totalIncome = 0
+    let confirmedIncome = 0
+
+    let spentFixed = 0
+    let confirmedFixed = 0
+
+    let spentVariable = 0
+    let confirmedVariable = 0
+
+    let spentInvestments = 0
+    let confirmedInvestments = 0
 
     const fixedCategoryIds = new Set(fixedCategories.map(c => c.id))
     const investmentCategoryIds = new Set(investmentCategories.map(c => c.id))
 
-    let spentFixed = 0
-    let spentVariable = 0
-    let spentInvestments = 0
-
     cycleTransactions.forEach(t => {
-      if (t.type !== 'expense') return
-      const isInvest = t.category_id && investmentCategoryIds.has(t.category_id)
-      const isFix = Boolean(t.is_recurring) || Boolean(t.category_id && fixedCategoryIds.has(t.category_id))
+      const acc = t.account_id ? accountsMap[t.account_id] : (t.account || null)
+      const isCreditCard = Boolean(acc && acc.type === 'credit_card')
+      const isConfirmed = isCreditCard ? t.status === 'paid_planned' : (t.status === 'paid_planned' || t.status === 'posted')
+      const amount = Number(t.amount)
 
-      if (isInvest) {
-        spentInvestments += Number(t.amount)
-      } else if (isFix) {
-        spentFixed += Number(t.amount)
-      } else {
-        spentVariable += Number(t.amount)
+      if (t.type === 'income') {
+        totalIncome += amount
+        if (isConfirmed) confirmedIncome += amount
+        return
+      }
+
+      if (t.type === 'expense') {
+        const isInvest = t.category_id && investmentCategoryIds.has(t.category_id)
+        const isFix = Boolean(t.is_recurring) || Boolean(t.category_id && fixedCategoryIds.has(t.category_id))
+
+        if (isInvest) {
+          spentInvestments += amount
+          if (isConfirmed) confirmedInvestments += amount
+        } else if (isFix) {
+          spentFixed += amount
+          if (isConfirmed) confirmedFixed += amount
+        } else {
+          spentVariable += amount
+          if (isConfirmed) confirmedVariable += amount
+        }
       }
     })
+
+    const plannedIncome = Math.max(plannedIncomeBase, totalIncome)
 
     const plannedFixedBase = fixedCategories.reduce((acc, c) => acc + Number(c.budget_amount || 0), 0)
     const plannedFixed = Math.max(plannedFixedBase, spentFixed)
 
-    const plannedVariable = variableCategories.reduce((acc, c) => acc + Number(c.budget_amount || 0), 0)
-    const plannedInvestments = investmentCategories.reduce((acc, c) => acc + Number(c.budget_amount || 0), 0)
+    const plannedVariableBase = variableCategories.reduce((acc, c) => acc + Number(c.budget_amount || 0), 0)
+    const plannedVariable = Math.max(plannedVariableBase, spentVariable)
+
+    const plannedInvestmentsBase = investmentCategories.reduce((acc, c) => acc + Number(c.budget_amount || 0), 0)
+    const plannedInvestments = Math.max(plannedInvestmentsBase, spentInvestments)
 
     const totalPlannedOutflow = plannedFixed + plannedVariable + plannedInvestments
     const totalSpentOutflow = spentFixed + spentVariable + spentInvestments
-    const effectiveIncome = realizedIncome > 0 ? realizedIncome : plannedIncome
-    const remainingBalance = effectiveIncome - totalSpentOutflow
+    const totalConfirmedOutflow = confirmedFixed + confirmedVariable + confirmedInvestments
+
+    const remainingBalancePlanned = plannedIncome - totalPlannedOutflow
+    const remainingBalanceConfirmed = confirmedIncome - totalConfirmedOutflow
 
     return {
       plannedIncome,
-      realizedIncome,
+      totalIncome,
+      confirmedIncome,
+      realizedIncome: confirmedIncome,
       plannedFixed,
       spentFixed,
+      confirmedFixed,
       plannedVariable,
       spentVariable,
+      confirmedVariable,
       plannedInvestments,
       spentInvestments,
+      confirmedInvestments,
       totalPlannedOutflow,
       totalSpentOutflow,
-      remainingBalance,
+      totalConfirmedOutflow,
+      remainingBalance: remainingBalancePlanned,
+      remainingBalancePlanned,
+      remainingBalanceConfirmed,
     }
-  }, [incomeCategories, fixedCategories, variableCategories, investmentCategories, cycleTransactions])
+  }, [incomeCategories, fixedCategories, variableCategories, investmentCategories, cycleTransactions, accountsMap])
 
   // Filtragem de dados especificamente para os gráficos com base no chartCostFilter
   const filteredSpentPerCategory = useMemo(() => {
@@ -924,21 +986,21 @@ export function PlannedClient({
       >
         {/* Card 1: Receita / Salário */}
         <div
-          onClick={() => setKpiModal({ title: 'Receita Prevista', type: 'income' })}
+          onClick={() => setKpiModal({ title: 'Receita Confirmada', type: 'income' })}
           className="glass-panel p-3.5 sm:p-5 rounded-2xl flex flex-col justify-between border-l-4 border-l-emerald-500 hover:shadow-lg transition-all cursor-pointer active:scale-[0.98] group"
         >
           <div>
             <div className="flex justify-between items-center mb-1 sm:mb-2">
-              <span className="text-[10px] sm:text-xs font-bold uppercase tracking-wider text-slate-400 truncate">Receita Prevista</span>
+              <span className="text-[10px] sm:text-xs font-bold uppercase tracking-wider text-slate-400 truncate">Receita</span>
               <ArrowUpRight className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-emerald-500 shrink-0 group-hover:translate-x-0.5 transition-transform" />
             </div>
-            <div className="text-base sm:text-2xl font-black text-slate-800 truncate">
-              {currencyFmt.format(metrics.plannedIncome || metrics.realizedIncome)}
+            <div className="text-base sm:text-2xl font-black text-slate-800 truncate tabular-nums">
+              {currencyFmt.format(metrics.confirmedIncome)}
             </div>
           </div>
           <div className="mt-2 sm:mt-4 pt-2 border-t border-slate-100 text-[10px] sm:text-xs text-slate-500 flex justify-between items-center">
-            <span>Realizado:</span>
-            <strong className="text-emerald-600 font-bold">{currencyFmt.format(metrics.realizedIncome)}</strong>
+            <span>Previsto:</span>
+            <strong className="text-slate-700 font-bold tabular-nums">{currencyFmt.format(metrics.plannedIncome)}</strong>
           </div>
         </div>
 
@@ -952,13 +1014,13 @@ export function PlannedClient({
               <span className="text-[10px] sm:text-xs font-bold uppercase tracking-wider text-slate-400 truncate">Custos Fixos</span>
               <ArrowDownRight className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-rose-500 shrink-0 group-hover:translate-y-0.5 transition-transform" />
             </div>
-            <div className="text-base sm:text-2xl font-black text-slate-800 truncate">
-              {currencyFmt.format(metrics.spentFixed)}
+            <div className="text-base sm:text-2xl font-black text-slate-800 truncate tabular-nums">
+              {currencyFmt.format(metrics.confirmedFixed)}
             </div>
           </div>
           <div className="mt-2 sm:mt-4 pt-2 border-t border-slate-100 text-[10px] sm:text-xs text-slate-500 flex justify-between items-center">
-            <span>Teto:</span>
-            <strong className="text-slate-700 font-bold">{currencyFmt.format(metrics.plannedFixed)}</strong>
+            <span>Previsto:</span>
+            <strong className="text-slate-700 font-bold tabular-nums">{currencyFmt.format(metrics.plannedFixed)}</strong>
           </div>
         </div>
 
@@ -972,13 +1034,13 @@ export function PlannedClient({
               <span className="text-[10px] sm:text-xs font-bold uppercase tracking-wider text-slate-400 truncate">Custos Variáveis</span>
               <Layers className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-amber-500 shrink-0 group-hover:scale-110 transition-transform" />
             </div>
-            <div className="text-base sm:text-2xl font-black text-slate-800 truncate">
-              {currencyFmt.format(metrics.spentVariable)}
+            <div className="text-base sm:text-2xl font-black text-slate-800 truncate tabular-nums">
+              {currencyFmt.format(metrics.confirmedVariable)}
             </div>
           </div>
           <div className="mt-2 sm:mt-4 pt-2 border-t border-slate-100 text-[10px] sm:text-xs text-slate-500 flex justify-between items-center">
-            <span>Teto:</span>
-            <strong className="text-slate-700 font-bold">{currencyFmt.format(metrics.plannedVariable)}</strong>
+            <span>Previsto:</span>
+            <strong className="text-slate-700 font-bold tabular-nums">{currencyFmt.format(metrics.plannedVariable)}</strong>
           </div>
         </div>
 
@@ -992,34 +1054,51 @@ export function PlannedClient({
               <span className="text-[10px] sm:text-xs font-bold uppercase tracking-wider text-slate-400 truncate">Investimentos</span>
               <PiggyBank className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-purple-600 shrink-0 group-hover:scale-110 transition-transform" />
             </div>
-            <div className="text-base sm:text-2xl font-black text-purple-700 truncate">
-              {currencyFmt.format(metrics.spentInvestments)}
+            <div className="text-base sm:text-2xl font-black text-purple-700 truncate tabular-nums">
+              {currencyFmt.format(metrics.confirmedInvestments)}
             </div>
           </div>
           <div className="mt-2 sm:mt-4 pt-2 border-t border-slate-100 text-[10px] sm:text-xs text-slate-500 flex justify-between items-center">
-            <span>Meta:</span>
-            <strong className="text-purple-900 font-bold">{currencyFmt.format(metrics.plannedInvestments)}</strong>
+            <span>Meta Mensal:</span>
+            <strong className="text-purple-900 font-bold tabular-nums">{currencyFmt.format(metrics.plannedInvestments)}</strong>
           </div>
         </div>
       </motion.div>
 
-      {/* Saldo Restante Banner */}
-      <div className={`p-3.5 sm:p-5 rounded-2xl flex flex-row items-center justify-between gap-3 shadow-sm border ${metrics.remainingBalance >= 0
-          ? 'bg-gradient-to-r from-emerald-500/10 via-teal-500/5 to-transparent border-emerald-500/30'
-          : 'bg-gradient-to-r from-rose-500/10 via-red-500/5 to-transparent border-rose-500/30'
-        }`}>
-        <div className="flex items-center gap-2.5 sm:gap-3 min-w-0">
-          <div className={`w-8 h-8 sm:w-10 sm:h-10 rounded-xl flex items-center justify-center text-white shrink-0 ${metrics.remainingBalance >= 0 ? 'bg-emerald-600' : 'bg-rose-600'}`}>
-            <Wallet className="w-4 h-4 sm:w-5 sm:h-5" />
+      {/* Saldo Restante Banner Hero (Estilo Limpo Light) */}
+      <div className="glass-panel p-4 sm:p-5 rounded-2xl border border-emerald-200/80 bg-gradient-to-r from-emerald-500/10 via-teal-500/5 to-white flex flex-col md:flex-row md:items-center justify-between gap-4 shadow-xs">
+        <div className="flex items-center gap-3.5">
+          <div className="w-10 h-10 rounded-xl bg-emerald-600 text-white flex items-center justify-center shrink-0 shadow-xs">
+            <Wallet className="w-5 h-5" />
           </div>
-          <div className="min-w-0">
-            <h3 className="text-xs sm:text-sm font-bold text-slate-800 truncate">Saldo Livre Previsto</h3>
-            <p className="text-[10px] sm:text-xs text-slate-500 truncate">Sobram após gastos e aportes</p>
+          <div>
+            <div className="flex items-center gap-2 mb-0.5">
+              <h3 className="text-xs sm:text-sm font-extrabold text-slate-900">Saldo Livre Previsto</h3>
+              <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-700 bg-emerald-100/90 px-2 py-0.5 rounded-md">
+                Projeção do Ciclo
+              </span>
+            </div>
+            <p className="text-[11px] sm:text-xs text-slate-500 max-w-sm">
+              Sobram após receber salário, quitar contas e realizar aportes.
+            </p>
           </div>
         </div>
-        <div className="text-right shrink-0">
-          <div className={`text-base sm:text-2xl font-black tabular-nums ${metrics.remainingBalance >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
-            {currencyFmt.format(metrics.remainingBalance)}
+
+        <div className="flex items-center justify-between md:justify-end gap-6 pt-3 md:pt-0 border-t md:border-t-0 border-emerald-100">
+          <div className="text-left md:text-right">
+            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Confirmado Hoje</span>
+            <span className={`text-xs sm:text-sm font-black tabular-nums ${metrics.remainingBalanceConfirmed >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
+              {currencyFmt.format(metrics.remainingBalanceConfirmed)}
+            </span>
+          </div>
+
+          <div className="h-7 w-[1px] bg-slate-200/80 hidden md:block" />
+
+          <div className="text-right">
+            <span className="text-[10px] font-bold text-emerald-700 uppercase tracking-wider block">Sobra Estimada</span>
+            <span className={`text-lg sm:text-2xl font-black tabular-nums ${metrics.remainingBalancePlanned >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
+              {currencyFmt.format(metrics.remainingBalancePlanned)}
+            </span>
           </div>
         </div>
       </div>
@@ -1299,94 +1378,165 @@ export function PlannedClient({
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4 sm:gap-6">
             {/* Despesas Fixas */}
-            <div className="flex flex-col gap-2.5 bg-slate-50/50 p-3.5 sm:p-4 rounded-2xl border border-slate-200/60">
-              <h4 className="text-[11px] sm:text-xs font-bold uppercase tracking-wider text-slate-500 flex items-center justify-between">
+            <div className="flex flex-col gap-2.5 bg-rose-50/20 p-3.5 sm:p-4 rounded-2xl border border-rose-200/40">
+              <h4 className="text-[11px] sm:text-xs font-bold uppercase tracking-wider text-rose-700 flex items-center justify-between">
                 <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-rose-500"></span> Despesas Fixas</span>
-                <span className="text-[10px] text-slate-400">{currencyFmt.format(metrics.spentFixed)}</span>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => {
+                      setEditingCat({ name: '', type: 'expense', icon: '📌', is_fixed: true, is_investment: false, budget_amount: 0 } as any)
+                      setIsCatModalOpen(true)
+                    }}
+                    className="text-[10px] font-bold text-rose-700 hover:text-rose-900 bg-rose-100/80 hover:bg-rose-200 px-2 py-0.5 rounded-lg transition-all"
+                  >
+                    + Nova Fixa
+                  </button>
+                  <span className="text-[10px] text-rose-600 font-bold tabular-nums">{currencyFmt.format(metrics.spentFixed)}</span>
+                </div>
               </h4>
               <div className="flex flex-col gap-2 mt-1">
-                {fixedCategories.map(cat => {
-                  const spent = spentPerCategory[cat.id] || 0
-                  const budget = cat.budget_amount || 0
-                  const pct = budget > 0 ? Math.min(100, Math.round((spent / budget) * 100)) : 0
-                  const isOver = budget > 0 && spent > budget
+                {fixedCategories.length > 0 ? (
+                  fixedCategories.map(cat => {
+                    const spent = spentPerCategory[cat.id] || 0
+                    const confirmed = confirmedPerCategory[cat.id] || 0
+                    const budget = cat.budget_amount || 0
+                    const pct = budget > 0 ? Math.min(100, Math.round((confirmed / budget) * 100)) : 0
+                    const isOver = budget > 0 && spent > budget
 
-                  return (
-                    <div
-                      key={cat.id}
-                      onClick={() => setViewCategoryDetail(cat)}
-                      className="p-3 bg-white border border-slate-200/80 hover:border-emerald-400 rounded-xl flex flex-col gap-1.5 cursor-pointer shadow-sm hover:shadow-md transition-all group"
-                    >
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="font-bold text-slate-900 text-xs flex items-center gap-1.5 min-w-0 flex-1">
-                          <span>{cat.icon || '📌'}</span>
-                          <span className="font-bold text-slate-900 leading-snug">{cat.name}</span>
-                        </span>
-                        <span className="text-[11px] font-bold tabular-nums text-slate-700 shrink-0">
-                          {currencyFmt.format(spent)}
-                        </span>
-                      </div>
-                      <div className="flex items-center justify-between text-[11px] text-slate-400 pt-1 border-t border-slate-100/80">
-                        <span>Teto: {budget > 0 ? currencyFmt.format(budget) : 'Sem limite'}</span>
-                        {budget > 0 && <span className={`font-bold ${isOver ? 'text-rose-600' : 'text-emerald-600'}`}>{pct}%</span>}
-                      </div>
-                      {budget > 0 && (
-                        <div className="w-full bg-slate-100 h-1.5 rounded-full overflow-hidden relative">
-                          <div
-                            className={`h-full rounded-full transition-all duration-500 ${isOver ? 'bg-rose-600' : (pct > 80 ? 'bg-amber-500' : 'bg-emerald-500')}`}
-                            style={{ width: `${pct}%` }}
-                          />
+                    return (
+                      <div
+                        key={cat.id}
+                        onClick={() => setViewCategoryDetail(cat)}
+                        className="p-3 bg-white border border-slate-200/80 hover:border-rose-400 rounded-xl flex flex-col gap-1.5 cursor-pointer shadow-sm hover:shadow-md transition-all group"
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="font-bold text-slate-900 text-xs flex items-center gap-1.5 min-w-0 flex-1">
+                            <span>{cat.icon || '📌'}</span>
+                            <span className="font-bold text-slate-900 leading-snug">{cat.name}</span>
+                          </span>
+                          <span className="text-xs font-black tabular-nums text-slate-800 shrink-0">
+                            {currencyFmt.format(confirmed)}
+                          </span>
                         </div>
-                      )}
-                    </div>
-                  )
-                })}
+                        <div className="flex items-center justify-between text-[11px] text-slate-500 pt-1 border-t border-slate-100/80">
+                          <span>Previsto: <strong className="text-slate-700 font-bold">{budget > 0 ? currencyFmt.format(budget) : 'Sem valor'}</strong></span>
+                          {budget > 0 && <span className={`font-bold ${isOver ? 'text-rose-600' : 'text-emerald-600'}`}>{pct}%</span>}
+                        </div>
+                        {budget > 0 && (
+                          <div className="w-full bg-rose-50 h-1.5 rounded-full overflow-hidden relative border border-rose-100/50">
+                            <div
+                              className={`h-full rounded-full transition-all duration-500 ${isOver ? 'bg-rose-600' : 'bg-rose-500'}`}
+                              style={{ width: `${pct}%` }}
+                            />
+                          </div>
+                        )}
+                      </div>
+                    )
+                  })
+                ) : (
+                  <div className="p-4 bg-white/70 border border-dashed border-rose-200 rounded-xl text-center flex flex-col items-center justify-center gap-1.5 my-1">
+                    <p className="text-xs text-rose-800 font-bold">Nenhuma despesa fixa cadastrada</p>
+                    <p className="text-[11px] text-rose-600 leading-relaxed">Cadastre suas contas recorrentes (aluguel, internet, etc.) para acompanhar no mês.</p>
+                    <button
+                      onClick={() => {
+                        setEditingCat({ name: '', type: 'expense', icon: '📌', is_fixed: true, is_investment: false, budget_amount: 0 } as any)
+                        setIsCatModalOpen(true)
+                      }}
+                      className="mt-1 px-3 py-1.5 bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs rounded-xl shadow-xs transition-all flex items-center gap-1 active:scale-95"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                      <span>Criar Despesa Fixa</span>
+                    </button>
+                  </div>
+                )}
               </div>
             </div>
 
             {/* Despesas Variáveis */}
-            <div className="flex flex-col gap-2.5 bg-slate-50/50 p-3.5 sm:p-4 rounded-2xl border border-slate-200/60">
-              <h4 className="text-[11px] sm:text-xs font-bold uppercase tracking-wider text-slate-500 flex items-center justify-between">
+            <div className="flex flex-col gap-2.5 bg-amber-50/20 p-3.5 sm:p-4 rounded-2xl border border-amber-200/40">
+              <h4 className="text-[11px] sm:text-xs font-bold uppercase tracking-wider text-amber-700 flex items-center justify-between">
                 <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-amber-500"></span> Despesas Variáveis</span>
-                <span className="text-[10px] text-slate-400">{currencyFmt.format(metrics.spentVariable)}</span>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => {
+                      setEditingCat({ name: '', type: 'expense', icon: '🛒', is_fixed: false, is_investment: false, budget_amount: 0 } as any)
+                      setIsCatModalOpen(true)
+                    }}
+                    className="text-[10px] font-bold text-amber-700 hover:text-amber-900 bg-amber-100/80 hover:bg-amber-200 px-2 py-0.5 rounded-lg transition-all"
+                  >
+                    + Nova Categoria
+                  </button>
+                  <span className="text-[10px] text-amber-600 font-bold tabular-nums">{currencyFmt.format(metrics.spentVariable)}</span>
+                </div>
               </h4>
               <div className="flex flex-col gap-2 mt-1">
-                {variableCategories.map(cat => {
-                  const spent = spentPerCategory[cat.id] || 0
-                  const budget = cat.budget_amount || 0
-                  const pct = budget > 0 ? Math.min(100, Math.round((spent / budget) * 100)) : 0
-                  const isOver = budget > 0 && spent > budget
+                {displayedVariableCategories.length > 0 ? (
+                  displayedVariableCategories.map(cat => {
+                    const spent = spentPerCategory[cat.id] || 0
+                    const confirmed = confirmedPerCategory[cat.id] || 0
+                    const budget = cat.budget_amount || 0
+                    const pct = budget > 0 ? Math.min(100, Math.round((confirmed / budget) * 100)) : 0
+                    const isOver = budget > 0 && spent > budget
 
-                  return (
-                    <div
-                      key={cat.id}
-                      onClick={() => setViewCategoryDetail(cat)}
-                      className="p-3 bg-white border border-slate-200/80 hover:border-emerald-400 rounded-xl flex flex-col gap-1.5 cursor-pointer shadow-sm hover:shadow-md transition-all group"
-                    >
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="font-bold text-slate-900 text-xs flex items-center gap-1.5 min-w-0 flex-1">
-                          <span>{cat.icon || '🛒'}</span>
-                          <span className="font-bold text-slate-900 leading-snug">{cat.name}</span>
-                        </span>
-                        <span className="text-[11px] font-bold tabular-nums text-slate-700 shrink-0">
-                          {currencyFmt.format(spent)}
-                        </span>
-                      </div>
-                      <div className="flex items-center justify-between text-[11px] text-slate-400 pt-1 border-t border-slate-100/80">
-                        <span>Teto: {budget > 0 ? currencyFmt.format(budget) : 'Sem limite'}</span>
-                        {budget > 0 && <span className={`font-bold ${isOver ? 'text-rose-600' : 'text-emerald-600'}`}>{pct}%</span>}
-                      </div>
-                      {budget > 0 && (
-                        <div className="w-full bg-slate-100 h-1.5 rounded-full overflow-hidden relative">
-                          <div
-                            className={`h-full rounded-full transition-all duration-500 ${isOver ? 'bg-rose-600' : (pct > 80 ? 'bg-amber-500' : 'bg-emerald-500')}`}
-                            style={{ width: `${pct}%` }}
-                          />
+                    return (
+                      <div
+                        key={cat.id}
+                        onClick={() => setViewCategoryDetail(cat)}
+                        className="p-3 bg-white border border-slate-200/80 hover:border-amber-400 rounded-xl flex flex-col gap-1.5 cursor-pointer shadow-sm hover:shadow-md transition-all group"
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="font-bold text-slate-900 text-xs flex items-center gap-1.5 min-w-0 flex-1">
+                            <span>{cat.icon || '🛒'}</span>
+                            <span className="font-bold text-slate-900 leading-snug">{cat.name}</span>
+                          </span>
+                          <span className="text-xs font-black tabular-nums text-slate-800 shrink-0">
+                            {currencyFmt.format(confirmed)}
+                          </span>
                         </div>
-                      )}
-                    </div>
-                  )
-                })}
+                        <div className="flex items-center justify-between text-[11px] text-slate-500 pt-1 border-t border-slate-100/80">
+                          <span>Previsto: <strong className="text-slate-700 font-bold">{budget > 0 ? currencyFmt.format(budget) : 'Sem limite'}</strong></span>
+                          {budget > 0 && <span className={`font-bold ${isOver ? 'text-rose-600' : 'text-emerald-600'}`}>{pct}%</span>}
+                        </div>
+                        {budget > 0 && (
+                          <div className="w-full bg-amber-50 h-1.5 rounded-full overflow-hidden relative border border-amber-100/50">
+                            <div
+                              className={`h-full rounded-full transition-all duration-500 ${isOver ? 'bg-rose-600' : (pct > 80 ? 'bg-amber-500' : 'bg-amber-400')}`}
+                              style={{ width: `${pct}%` }}
+                            />
+                          </div>
+                        )}
+                      </div>
+                    )
+                  })
+                ) : (
+                  <div className="p-4 bg-white/70 border border-dashed border-amber-200 rounded-xl text-center flex flex-col items-center justify-center gap-1.5 my-1">
+                    <p className="text-xs text-amber-800 font-bold">Nenhuma categoria variável cadastrada</p>
+                    <p className="text-[11px] text-amber-600 leading-relaxed">Cadastre categorias de consumo do dia a dia (alimentação, lazer, etc.).</p>
+                    <button
+                      onClick={() => {
+                        setEditingCat({ name: '', type: 'expense', icon: '🛒', is_fixed: false, is_investment: false, budget_amount: 0 } as any)
+                        setIsCatModalOpen(true)
+                      }}
+                      className="mt-1 px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs rounded-xl shadow-xs transition-all flex items-center gap-1 active:scale-95"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                      <span>Criar Categoria Variável</span>
+                    </button>
+                  </div>
+                )}
+
+                {variableCategories.length > activeVariableCategories.length && activeVariableCategories.length > 0 && (
+                  <button
+                    onClick={() => setShowAllVariableCategories(!showAllVariableCategories)}
+                    className="mt-1.5 py-2 px-3 text-[11px] font-bold text-amber-800 hover:text-amber-950 bg-amber-50/80 hover:bg-amber-100 rounded-xl transition-all border border-amber-200/80 text-center flex items-center justify-center gap-1 active:scale-98"
+                  >
+                    <span>
+                      {showAllVariableCategories
+                        ? "▲ Ocultar categorias sem limite"
+                        : `▼ Ver todas (${variableCategories.length - activeVariableCategories.length} ocultas sem limite)`}
+                    </span>
+                  </button>
+                )}
               </div>
             </div>
 
@@ -1394,44 +1544,73 @@ export function PlannedClient({
             <div className="flex flex-col gap-2.5 bg-purple-50/20 p-3.5 sm:p-4 rounded-2xl border border-purple-200/50">
               <h4 className="text-[11px] sm:text-xs font-bold uppercase tracking-wider text-purple-700 flex items-center justify-between">
                 <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-purple-500"></span> Investimentos & Metas</span>
-                <span className="text-[10px] text-purple-500">{currencyFmt.format(metrics.spentInvestments)}</span>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => {
+                      setEditingCat({ name: '', type: 'expense', icon: '💎', is_investment: true, budget_amount: 0 } as any)
+                      setIsCatModalOpen(true)
+                    }}
+                    className="text-[10px] font-bold text-purple-700 hover:text-purple-900 bg-purple-100 hover:bg-purple-200 px-2 py-0.5 rounded-lg transition-all"
+                  >
+                    + Nova Meta
+                  </button>
+                  <span className="text-[10px] text-purple-500 font-bold tabular-nums">{currencyFmt.format(metrics.spentInvestments)}</span>
+                </div>
               </h4>
               <div className="flex flex-col gap-2 mt-1">
-                {investmentCategories.map(cat => {
-                  const spent = spentPerCategory[cat.id] || 0
-                  const budget = cat.budget_amount || 0
-                  const pct = budget > 0 ? Math.min(100, Math.round((spent / budget) * 100)) : 0
+                {investmentCategories.length > 0 ? (
+                  investmentCategories.map(cat => {
+                    const spent = spentPerCategory[cat.id] || 0
+                    const confirmed = confirmedPerCategory[cat.id] || 0
+                    const budget = cat.budget_amount || 0
+                    const pct = budget > 0 ? Math.min(100, Math.round((confirmed / budget) * 100)) : 0
 
-                  return (
-                    <div
-                      key={cat.id}
-                      onClick={() => setViewCategoryDetail(cat)}
-                      className="p-3 bg-white border border-purple-200/80 hover:border-purple-400 rounded-xl flex flex-col gap-1.5 cursor-pointer shadow-sm hover:shadow-md transition-all group"
-                    >
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="font-bold text-slate-900 text-xs flex items-center gap-1.5 min-w-0 flex-1">
-                          <span>{cat.icon || '💎'}</span>
-                          <span className="font-bold text-slate-900 leading-snug">{cat.name}</span>
-                        </span>
-                        <span className="text-[11px] font-bold tabular-nums text-purple-900 shrink-0">
-                          {currencyFmt.format(spent)}
-                        </span>
-                      </div>
-                      <div className="flex items-center justify-between text-[11px] text-purple-500 pt-1 border-t border-purple-100/80">
-                        <span>Meta: {budget > 0 ? currencyFmt.format(budget) : 'Sem meta'}</span>
-                        {budget > 0 && <span className="font-bold text-purple-700">{pct}%</span>}
-                      </div>
-                      {budget > 0 && (
-                        <div className="w-full bg-purple-100 h-1.5 rounded-full overflow-hidden relative">
-                          <div
-                            className="h-full bg-purple-600 rounded-full transition-all duration-500"
-                            style={{ width: `${pct}%` }}
-                          />
+                    return (
+                      <div
+                        key={cat.id}
+                        onClick={() => setViewCategoryDetail(cat)}
+                        className="p-3 bg-white border border-purple-200/80 hover:border-purple-400 rounded-xl flex flex-col gap-1.5 cursor-pointer shadow-sm hover:shadow-md transition-all group"
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="font-bold text-slate-900 text-xs flex items-center gap-1.5 min-w-0 flex-1">
+                            <span>{cat.icon || '💎'}</span>
+                            <span className="font-bold text-slate-900 leading-snug">{cat.name}</span>
+                          </span>
+                          <span className="text-xs font-black tabular-nums text-purple-900 shrink-0">
+                            {currencyFmt.format(confirmed)}
+                          </span>
                         </div>
-                      )}
-                    </div>
-                  )
-                })}
+                        <div className="flex items-center justify-between text-[11px] text-purple-600 pt-1 border-t border-purple-100/80">
+                          <span>Meta: <strong className="text-purple-900 font-bold">{budget > 0 ? currencyFmt.format(budget) : 'Sem meta'}</strong></span>
+                          {budget > 0 && <span className="font-bold text-purple-700">{pct}%</span>}
+                        </div>
+                        {budget > 0 && (
+                          <div className="w-full bg-purple-100 h-1.5 rounded-full overflow-hidden relative">
+                            <div
+                              className="h-full bg-purple-600 rounded-full transition-all duration-500"
+                              style={{ width: `${pct}%` }}
+                            />
+                          </div>
+                        )}
+                      </div>
+                    )
+                  })
+                ) : (
+                  <div className="p-4 bg-white/70 border border-dashed border-purple-200 rounded-xl text-center flex flex-col items-center justify-center gap-1.5 my-1">
+                    <p className="text-xs text-purple-800 font-bold">Nenhuma meta de investimento definida</p>
+                    <p className="text-[11px] text-purple-600 leading-relaxed">Defina quanto pretende aportar por mês em reserva, ações, fundos, etc.</p>
+                    <button
+                      onClick={() => {
+                        setEditingCat({ name: '', type: 'expense', icon: '💎', is_investment: true, budget_amount: 0 } as any)
+                        setIsCatModalOpen(true)
+                      }}
+                      className="mt-1 px-3 py-1.5 bg-purple-600 hover:bg-purple-700 text-white font-bold text-xs rounded-xl shadow-xs transition-all flex items-center gap-1 active:scale-95"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                      <span>Definir Meta de Investimento</span>
+                    </button>
+                  </div>
+                )}
               </div>
             </div>
           </div>
@@ -1666,58 +1845,118 @@ export function PlannedClient({
                   </div>
 
                   <div className="flex flex-col gap-1.5 pt-1.5 border-t border-purple-100">
-                    {group.transactions.map(t => (
-                      <div
-                        key={t.id}
-                        onClick={() => {
-                          setEditingTx(t)
-                          setIsTxModalOpen(true)
-                        }}
-                        className="p-2.5 rounded-xl bg-white hover:bg-slate-50 border border-slate-100 flex items-center justify-between gap-2 cursor-pointer transition-all active:scale-[0.99]"
-                      >
-                        <div className="flex items-center gap-2 min-w-0 flex-1">
-                          <span className="text-sm shrink-0">{t.category?.icon || '💳'}</span>
-                          <div className="min-w-0 flex-1">
-                            <div className="font-bold text-slate-800 text-xs truncate">{t.description}</div>
-                            <div className="text-[10px] text-slate-400 font-medium">
-                              {dateFmt.format(new Date(t.date + 'T12:00:00'))} • {t.category?.name || 'Geral'}
+                    {group.transactions.map(t => {
+                      const isPaid = t.status === 'paid_planned'
+                      return (
+                        <div
+                          key={t.id}
+                          onClick={() => {
+                            setEditingTx(t)
+                            setIsTxModalOpen(true)
+                          }}
+                          className={`p-2.5 rounded-xl border flex items-center justify-between gap-2 cursor-pointer transition-all active:scale-[0.99] ${
+                            isPaid
+                              ? 'bg-slate-50/70 border-slate-100 opacity-60'
+                              : 'bg-white hover:bg-slate-50 border-slate-100 shadow-2xs'
+                          }`}
+                        >
+                          <div className="flex items-center gap-2 min-w-0 flex-1">
+                            <span className="text-sm shrink-0">{t.category?.icon || '💳'}</span>
+                            <div className="min-w-0 flex-1">
+                              <div className={`font-bold text-xs truncate ${isPaid ? 'line-through text-slate-400' : 'text-slate-800'}`}>
+                                {t.description}
+                              </div>
+                              <div className="text-[10px] text-slate-400 font-medium">
+                                {dateFmt.format(new Date(t.date + 'T12:00:00'))} • {t.category?.name || 'Geral'}
+                              </div>
                             </div>
                           </div>
+                          <div className="flex items-center gap-2 shrink-0">
+                            {isPaid ? (
+                              <span className="text-[9px] font-extrabold text-emerald-700 bg-emerald-100 px-1.5 py-0.5 rounded-md border border-emerald-200">
+                                ✓ Pago
+                              </span>
+                            ) : (
+                              <span className="text-[9px] font-bold text-amber-700 bg-amber-50 px-1.5 py-0.5 rounded-md border border-amber-200/60">
+                                Fatura Aberta
+                              </span>
+                            )}
+                            <span className={`font-black text-xs tabular-nums ${isPaid ? 'line-through text-slate-400' : 'text-rose-600'}`}>
+                              {currencyFmt.format(Number(t.amount))}
+                            </span>
+                          </div>
                         </div>
-                        <span className="font-black text-xs tabular-nums shrink-0 text-rose-600">
-                          {currencyFmt.format(Number(t.amount))}
-                        </span>
-                      </div>
-                    ))}
+                      )
+                    })}
                   </div>
                 </div>
               ))}
 
               {/* Lançamentos comuns (Bancos, PIX, Dinheiro, Receitas) */}
-              {kpiStandardTransactions.map(t => (
-                <div
-                  key={t.id}
-                  onClick={() => {
-                    setEditingTx(t)
-                    setIsTxModalOpen(true)
-                  }}
-                  className="p-3 rounded-xl bg-slate-50 hover:bg-slate-100 border border-slate-200/80 flex items-center justify-between gap-2 cursor-pointer transition-all active:scale-[0.99] group"
-                >
-                  <div className="flex items-center gap-2.5 min-w-0 flex-1">
-                    <span className="text-base shrink-0">{t.category?.icon || (t.type === 'expense' ? '💸' : '💰')}</span>
-                    <div className="min-w-0 flex-1">
-                      <div className="font-bold text-slate-800 text-xs sm:text-sm truncate">{t.description}</div>
-                      <div className="text-[11px] text-slate-400 font-medium">
-                        {dateFmt.format(new Date(t.date + 'T12:00:00'))} • {t.category?.name || 'Geral'}
+              {kpiStandardTransactions.map(t => {
+                const acc = t.account_id ? accountsMap[t.account_id] : (t.account || null)
+                const isCreditCard = Boolean(acc && acc.type === 'credit_card')
+                const isPaid = isCreditCard ? t.status === 'paid_planned' : (t.status === 'paid_planned' || t.status === 'posted')
+
+                return (
+                  <div
+                    key={t.id}
+                    onClick={() => {
+                      setEditingTx(t)
+                      setIsTxModalOpen(true)
+                    }}
+                    className={`p-3 rounded-xl border flex items-center justify-between gap-3 cursor-pointer transition-all active:scale-[0.99] group ${
+                      isPaid
+                        ? 'bg-slate-100/60 border-slate-200/50 opacity-65'
+                        : 'bg-white hover:bg-slate-50 border-slate-200/80 shadow-2xs'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                      <span className="text-base shrink-0">{t.category?.icon || (t.type === 'expense' ? '💸' : '💰')}</span>
+                      <div className="min-w-0 flex-1">
+                        <div className={`font-bold text-xs sm:text-sm truncate ${isPaid ? 'line-through text-slate-400' : 'text-slate-800'}`}>
+                          {t.description}
+                        </div>
+                        <div className="text-[11px] text-slate-400 font-medium">
+                          {dateFmt.format(new Date(t.date + 'T12:00:00'))} • {t.category?.name || 'Geral'}
+                        </div>
                       </div>
                     </div>
-                  </div>
 
-                  <div className={`font-black text-xs sm:text-sm tabular-nums shrink-0 ${t.type === 'income' ? 'text-emerald-600' : 'text-rose-600'}`}>
-                    {currencyFmt.format(Number(t.amount))}
+                    <div className="flex items-center gap-3 shrink-0">
+                      <div className={`font-black text-xs sm:text-sm tabular-nums ${isPaid ? 'line-through text-slate-400' : (t.type === 'income' ? 'text-emerald-600' : 'text-rose-600')}`}>
+                        {currencyFmt.format(Number(t.amount))}
+                      </div>
+
+                      {isPaid ? (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            handleUnpay(t.id)
+                          }}
+                          className="px-2 py-1 bg-emerald-100/80 hover:bg-rose-100 text-emerald-800 hover:text-rose-700 font-bold text-[10px] rounded-lg border border-emerald-200/80 transition-all flex items-center gap-1 group/btn"
+                          title="Clique para voltar para pendente"
+                        >
+                          <CheckCircle2 className="w-3 h-3 text-emerald-600 group-hover/btn:hidden" />
+                          <span className="group-hover/btn:inline hidden font-bold">Desfazer</span>
+                          <span className="group-hover/btn:hidden">{t.type === 'income' ? 'Recebido' : 'Pago'}</span>
+                        </button>
+                      ) : (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            handlePay(t.id)
+                          }}
+                          className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white font-bold text-xs rounded-lg transition-all flex items-center gap-1 shadow-2xs shrink-0"
+                        >
+                          <Check className="w-3.5 h-3.5" />
+                          <span>{t.type === 'income' ? 'Dar Baixa' : 'Pagar'}</span>
+                        </button>
+                      )}
+                    </div>
                   </div>
-                </div>
-              ))}
+                )
+              })}
             </div>
           ) : (
             <div className="p-8 text-center text-slate-400 flex flex-col items-center gap-2">
@@ -1757,7 +1996,11 @@ export function PlannedClient({
           setIsCatModalOpen(false)
           setEditingCat(null)
         }}
-        title={editingCat ? `Editar Orçamento: ${editingCat.name}` : `Nova Categoria`}
+        title={
+          editingCat && editingCat.id
+            ? (editingCat.is_investment ? `Editar Meta: ${editingCat.name}` : `Editar Orçamento: ${editingCat.name}`)
+            : (editingCat?.is_investment ? `Nova Meta de Investimento` : `Nova Categoria`)
+        }
       >
         <CategoryForm
           workspaceId={workspaces[0]?.id}

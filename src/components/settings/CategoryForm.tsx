@@ -30,17 +30,34 @@ type State = { error?: string; success?: string }
 const initialState: State = {}
 
 export function CategoryForm({ workspaceId, initialData, onSuccess }: CategoryFormProps) {
-  const actionFn = initialData ? updateCategory.bind(null, initialData.id) : createCategory
+  const isEditing = Boolean(initialData && initialData.id)
+  const actionFn = isEditing ? updateCategory.bind(null, initialData!.id) : createCategory
   const [state, formAction, pending] = useActionState(actionFn, initialState)
 
   const [showEmojiPicker, setShowEmojiPicker] = useState(false)
   const [selectedEmoji, setSelectedEmoji] = useState(initialData?.icon || '💰')
-  const [type, setType] = useState(initialData?.type || 'expense')
-  const [isFixed, setIsFixed] = useState(initialData?.is_fixed || false)
-  const [isInvestment, setIsInvestment] = useState(initialData?.is_investment || false)
-  const [budgetAmount, setBudgetAmount] = useState(
-    initialData?.budget_amount ? String(initialData.budget_amount) : ''
+  const [categoryKind, setCategoryKind] = useState<'expense' | 'income' | 'investment'>(
+    initialData?.is_investment ? 'investment' : (initialData?.type === 'income' ? 'income' : 'expense')
   )
+  const [isFixed, setIsFixed] = useState(initialData?.is_fixed || false)
+  const [budgetAmount, setBudgetAmount] = useState(() => {
+    if (initialData?.budget_amount) {
+      const val = Number(initialData.budget_amount)
+      if (val > 0) {
+        return val.toFixed(2).replace('.', ',').replace(/\B(?=(\d{3})+(?!\d))/g, '.')
+      }
+    }
+    return ''
+  })
+
+  const handleBudgetChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    let value = e.target.value.replace(/\D/g, '')
+    if (value.length > 0) {
+      value = (parseInt(value, 10) / 100).toFixed(2).replace('.', ',')
+      value = value.replace(/\B(?=(\d{3})+(?!\d))/g, '.')
+    }
+    setBudgetAmount(value)
+  }
 
   useEffect(() => {
     if (state.success && onSuccess) {
@@ -48,10 +65,15 @@ export function CategoryForm({ workspaceId, initialData, onSuccess }: CategoryFo
     }
   }, [state.success, onSuccess])
 
+  const effectiveType = categoryKind === 'income' ? 'income' : 'expense'
+  const effectiveIsInvestment = categoryKind === 'investment'
+
   return (
     <form action={formAction} className="flex flex-col gap-5">
       <input type="hidden" name="workspace_id" value={workspaceId} />
       <input type="hidden" name="icon" value={selectedEmoji} />
+      <input type="hidden" name="type" value={effectiveType} />
+      <input type="hidden" name="is_investment" value={effectiveIsInvestment ? 'true' : 'false'} />
       
       {state.error && (
         <div className="p-3 text-sm text-rose-600 bg-rose-50 border border-rose-200 rounded-xl font-medium">
@@ -99,49 +121,96 @@ export function CategoryForm({ workspaceId, initialData, onSuccess }: CategoryFo
             type="text"
             required
             defaultValue={initialData?.name || ''}
-            placeholder="Ex: Salário, Mercado, Aluguel..."
-            className="w-full px-4 py-3 rounded-xl border border-slate-200 bg-slate-50/50 text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all duration-200"
+            placeholder={categoryKind === 'investment' ? 'Ex: Ações, Tesouro Direto, Reserva...' : (categoryKind === 'income' ? 'Ex: Salário, Freelance...' : 'Ex: Mercado, Aluguel...')}
+            className="w-full px-4 py-3 rounded-xl border border-slate-200 bg-slate-50/50 text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all duration-200 font-medium"
           />
         </div>
       </div>
 
       <div className="group">
-        <label className="block text-sm font-bold text-slate-700 mb-1.5 transition-colors group-focus-within:text-emerald-600" htmlFor="type">
-          Tipo de Fluxo
+        <label className="block text-sm font-bold text-slate-700 mb-1.5 transition-colors group-focus-within:text-emerald-600">
+          Tipo da Categoria
         </label>
-        <select
-          id="type"
-          name="type"
-          value={type}
-          onChange={(e) => setType(e.target.value)}
-          required
-          className="w-full px-4 py-3 rounded-xl border border-slate-200 bg-slate-50/50 text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all duration-200"
-        >
-          <option value="expense">Despesa (Saída)</option>
-          <option value="income">Receita (Entrada)</option>
-        </select>
+        <div className="grid grid-cols-3 gap-2">
+          <button
+            type="button"
+            onClick={() => {
+              setCategoryKind('expense')
+              if (selectedEmoji === '💎' || selectedEmoji === '💰') setSelectedEmoji('💸')
+            }}
+            className={`py-2.5 px-2 rounded-xl border text-xs font-bold transition-all flex flex-col items-center gap-1 ${
+              categoryKind === 'expense'
+                ? 'bg-rose-50 border-rose-300 text-rose-700 shadow-xs'
+                : 'bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100'
+            }`}
+          >
+            <span className="text-base">💸</span>
+            <span>Despesa</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              setCategoryKind('income')
+              if (selectedEmoji === '💸' || selectedEmoji === '💎') setSelectedEmoji('💰')
+            }}
+            className={`py-2.5 px-2 rounded-xl border text-xs font-bold transition-all flex flex-col items-center gap-1 ${
+              categoryKind === 'income'
+                ? 'bg-emerald-50 border-emerald-300 text-emerald-700 shadow-xs'
+                : 'bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100'
+            }`}
+          >
+            <span className="text-base">💰</span>
+            <span>Receita</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              setCategoryKind('investment')
+              if (selectedEmoji === '💸' || selectedEmoji === '💰') setSelectedEmoji('💎')
+            }}
+            className={`py-2.5 px-2 rounded-xl border text-xs font-bold transition-all flex flex-col items-center gap-1 ${
+              categoryKind === 'investment'
+                ? 'bg-purple-50 border-purple-300 text-purple-700 shadow-xs ring-1 ring-purple-400'
+                : 'bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100'
+            }`}
+          >
+            <span className="text-base">💎</span>
+            <span>Investimento</span>
+          </button>
+        </div>
       </div>
 
       {/* Orçamento Mensal / Meta */}
       <div className="group">
         <label className="block text-sm font-bold text-slate-700 mb-1.5 transition-colors group-focus-within:text-emerald-600" htmlFor="budget_amount">
-          {type === 'income' ? 'Expectativa de Receita Mensal (R$)' : 'Orçamento / Teto Mensal (R$)'}
+          {categoryKind === 'investment'
+            ? '🎯 Meta de Aporte Mensal'
+            : (categoryKind === 'income' ? 'Expectativa de Receita Mensal' : 'Orçamento / Teto Mensal')}
         </label>
-        <input
-          id="budget_amount"
-          name="budget_amount"
-          type="number"
-          step="0.01"
-          min="0"
-          value={budgetAmount}
-          onChange={(e) => setBudgetAmount(e.target.value)}
-          placeholder="Ex: 1500.00 (Deixe 0 para sem limite)"
-          className="w-full px-4 py-3 rounded-xl border border-slate-200 bg-slate-50/50 text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all duration-200"
-        />
+        <div className="relative flex items-center">
+          <span className="absolute left-4 font-bold text-slate-400 text-sm">R$</span>
+          <input
+            id="budget_amount"
+            name="budget_amount"
+            type="text"
+            inputMode="numeric"
+            value={budgetAmount}
+            onChange={handleBudgetChange}
+            placeholder="0,00"
+            className="w-full pl-11 pr-4 py-3 rounded-xl border border-slate-200 bg-slate-50/50 text-slate-800 font-bold focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all duration-200"
+          />
+        </div>
+        {categoryKind === 'investment' && (
+          <p className="text-[11px] text-purple-600 font-medium mt-1">
+            Esta meta define o valor planejado de investimento no ciclo mensal da aba Planos.
+          </p>
+        )}
       </div>
 
-      {/* Opções extras para Despesas */}
-      {type === 'expense' && (
+      {/* Opções extras apenas para Despesas comuns */}
+      {categoryKind === 'expense' && (
         <div className="flex flex-col gap-3 p-3.5 bg-slate-50 rounded-xl border border-slate-200/80">
           <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Classificação do Gasto</label>
           
@@ -155,17 +224,6 @@ export function CategoryForm({ workspaceId, initialData, onSuccess }: CategoryFo
             />
             <span>Despesa Fixa (ex: Aluguel, Internet, Assinaturas)</span>
           </label>
-
-          <label className="flex items-center gap-2.5 cursor-pointer text-sm font-semibold text-slate-700">
-            <input
-              type="checkbox"
-              name="is_investment"
-              checked={isInvestment}
-              onChange={(e) => setIsInvestment(e.target.checked)}
-              className="w-4 h-4 text-purple-600 rounded border-slate-300 focus:ring-purple-500"
-            />
-            <span>É um Investimento / Aporte (ex: Ações, Tesouro, Reserva)</span>
-          </label>
         </div>
       )}
 
@@ -176,7 +234,7 @@ export function CategoryForm({ workspaceId, initialData, onSuccess }: CategoryFo
         disabled={pending}
         className="w-full mt-2 bg-slate-900 hover:bg-slate-800 text-white font-bold py-3.5 px-4 rounded-xl flex justify-center items-center gap-2 transition-all shadow-[0_4px_14px_0_rgb(0,0,0,0.1)] disabled:opacity-70"
       >
-        {pending ? <Loader2 className="w-5 h-5 animate-spin" /> : (initialData ? 'Atualizar Categoria' : 'Criar Categoria')}
+        {pending ? <Loader2 className="w-5 h-5 animate-spin" /> : (isEditing ? 'Atualizar Categoria' : 'Criar Categoria')}
       </motion.button>
     </form>
   )
