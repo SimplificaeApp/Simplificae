@@ -44,20 +44,36 @@ export function AccountsClient({
   const currencyFmt = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' })
 
   const handleDeleteAccount = (id: string) => {
-    if (!confirm('Tem certeza? Isso excluirá a conta e todos os cofrinhos vinculados (pode falhar se houverem transações).')) return
-    startTransition(async () => {
-      const res = await deleteAccount(id)
-      if (res?.error) toast.error(res.error)
-      else toast.success(res.success)
+    toast('Deseja excluir esta conta?', {
+      description: 'Isso excluirá a conta e todos os cofrinhos vinculados (pode falhar se houverem transações).',
+      action: {
+        label: 'Sim, excluir',
+        onClick: () => {
+          startTransition(async () => {
+            const res = await deleteAccount(id)
+            if (res?.error) toast.error(res.error)
+            else toast.success(res.success)
+          })
+        }
+      },
+      cancel: { label: 'Cancelar', onClick: () => { } }
     })
   }
 
   const handleDeleteVault = (id: string) => {
-    if (!confirm('Tem certeza que deseja excluir este cofrinho? O saldo fictício dele deixará de existir.')) return
-    startTransition(async () => {
-      const res = await deleteVault(id)
-      if (res?.error) toast.error(res.error)
-      else toast.success(res.success)
+    toast('Deseja excluir este cofrinho?', {
+      description: 'O saldo fictício deste cofrinho deixará de existir.',
+      action: {
+        label: 'Sim, excluir',
+        onClick: () => {
+          startTransition(async () => {
+            const res = await deleteVault(id)
+            if (res?.error) toast.error(res.error)
+            else toast.success(res.success)
+          })
+        }
+      },
+      cancel: { label: 'Cancelar', onClick: () => { } }
     })
   }
 
