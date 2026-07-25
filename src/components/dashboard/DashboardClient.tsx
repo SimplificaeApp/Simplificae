@@ -24,11 +24,6 @@ import { TransactionForm } from "@/components/transactions/TransactionForm";
 import { getCreditCardDueDate } from "@/lib/creditCardUtils";
 import { Lock } from "lucide-react";
 import dynamic from "next/dynamic";
-import {
-  ResponsiveContainer,
-  LineChart,
-  Line,
-} from "recharts";
 
 // Lazy load ECharts to avoid large bundle impact on initial load
 const ReactECharts = dynamic(() => import("echarts-for-react"), { ssr: false, loading: () => <div className="h-full w-full bg-slate-50 rounded-xl animate-pulse" /> });

@@ -1,11 +1,12 @@
 'use client'
 
 import { useState, useTransition } from 'react'
-import { Wallet, Plus, Trash2, Edit3, Settings, Eye, EyeOff } from 'lucide-react'
+import { Wallet, Plus, Trash2, Edit3, Settings, Eye, EyeOff, History } from 'lucide-react'
 import { Modal } from '@/components/ui/Modal'
 import { AccountForm } from './AccountForm'
 import { VaultForm } from './VaultForm'
 import { VaultActionForm } from './VaultActionForm'
+import { VaultHistoryModal } from './VaultHistoryModal'
 import { motion } from 'framer-motion'
 import { deleteAccount, editAccountBalance, toggleAccountHidden } from '@/app/actions/accounts'
 import { deleteVault, editVaultBalance, toggleVaultHidden } from '@/app/actions/vaults'
@@ -29,13 +30,14 @@ export function AccountsClient({
   const [selectedAccountId, setSelectedAccountId] = useState<string | null>(null)
   const [isVaultActionModalOpen, setIsVaultActionModalOpen] = useState(false)
   const [vaultActionState, setVaultActionState] = useState<{ id: string, type: 'deposit' | 'withdraw' } | null>(null)
-  
+  const [historyVault, setHistoryVault] = useState<Vault | null>(null)
+
   const { isUnlocked, requestUnlock } = usePrivacy()
-  
+
   // States for Edit Modals
   const [isEditAccModalOpen, setIsEditAccModalOpen] = useState(false)
   const [editAccTarget, setEditAccTarget] = useState<Account | null>(null)
-  
+
   const [isEditAccMetaModalOpen, setIsEditAccMetaModalOpen] = useState(false)
   const [editAccMetaTarget, setEditAccMetaTarget] = useState<Account | null>(null)
 
@@ -44,6 +46,15 @@ export function AccountsClient({
 
   const [isPending, startTransition] = useTransition()
   const currencyFmt = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' })
+
+  // Guard: asks for PIN unlock before performing any action on a hidden vault
+  const withVaultPrivacy = (vault: Vault, callback: () => void) => {
+    if ((vault as any).is_hidden && !isUnlocked) {
+      requestUnlock(callback)
+    } else {
+      callback()
+    }
+  }
 
   const handleDeleteAccount = (id: string) => {
     toast('Deseja excluir esta conta?', {
@@ -90,7 +101,6 @@ export function AccountsClient({
 
   const handleToggleAccountHidden = (id: string, current: boolean) => {
     if (current) {
-      // Trying to unhide
       requestUnlock(() => {
         startTransition(async () => {
           const res = await toggleAccountHidden(id, !current)
@@ -128,7 +138,7 @@ export function AccountsClient({
       <motion.div {...fadeUp} transition={{ duration: 0.3 }} className="glass-panel p-6 rounded-2xl">
         <div className="flex justify-between items-center mb-6">
           <h2 className="text-lg font-bold text-slate-800">Minhas Contas</h2>
-          <button 
+          <button
             onClick={() => setIsAccountModalOpen(true)}
             className="btn-primary py-2 px-4 flex items-center gap-2 text-sm shadow-md"
           >
@@ -140,9 +150,10 @@ export function AccountsClient({
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {accounts.map(acc => (
             <div key={acc.id} className="border border-slate-100 rounded-2xl bg-white shadow-sm hover:shadow-md transition-shadow group flex flex-col">
+              {/* Account Header */}
               <div className="p-4 sm:p-5 flex flex-wrap justify-between items-start gap-3 mb-2">
                 <div className="flex items-center gap-3 min-w-0">
-                  <div 
+                  <div
                     className="w-12 h-12 shrink-0 rounded-xl flex items-center justify-center text-2xl shadow-sm"
                     style={{ backgroundColor: acc.color ? `${acc.color}15` : '#f1f5f9', color: acc.color || '#475569' }}
                   >
@@ -154,42 +165,43 @@ export function AccountsClient({
                   </div>
                 </div>
                 <div className="flex items-center gap-1 sm:gap-2 shrink-0">
-                  <button 
+                  <button
                     onClick={() => handleToggleAccountHidden(acc.id, !!(acc as any).is_hidden)}
                     disabled={isPending}
-                    className="w-8 h-8 flex items-center justify-center text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg transition-all"
+                    className="w-8 h-8 flex items-center justify-center text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg transition-all cursor-pointer"
                     title={(acc as any).is_hidden ? "Mostrar Conta" : "Ocultar Conta"}
                   >
                     {(acc as any).is_hidden ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                   </button>
-                  <button 
+                  <button
                     onClick={() => { setEditAccMetaTarget(acc); setIsEditAccMetaModalOpen(true) }}
-                    className="w-8 h-8 flex items-center justify-center text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-all"
+                    className="w-8 h-8 flex items-center justify-center text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-all cursor-pointer"
                     title="Editar Perfil da Conta"
                   >
                     <Settings className="w-4 h-4" />
                   </button>
-                  <button 
+                  <button
                     onClick={() => { setEditAccTarget(acc); setIsEditAccModalOpen(true) }}
-                    className="w-8 h-8 flex items-center justify-center text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg transition-all"
+                    className="w-8 h-8 flex items-center justify-center text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg transition-all cursor-pointer"
                     title="Ajustar Saldo Bruto"
                   >
                     <Edit3 className="w-4 h-4" />
                   </button>
-                  <button 
+                  <button
                     onClick={() => handleDeleteAccount(acc.id)}
                     disabled={isPending}
-                    className="w-8 h-8 flex items-center justify-center text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-all"
+                    className="w-8 h-8 flex items-center justify-center text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-all cursor-pointer"
                     title="Excluir Conta"
                   >
                     <Trash2 className="w-4 h-4" />
                   </button>
                 </div>
               </div>
-              
+
+              {/* Account Balance */}
               <div className="px-5 pb-5">
                 <div className="text-sm text-slate-500 mb-1">Saldo Bruto {(acc as any).is_hidden ? '🔒' : ''}</div>
-                <div 
+                <div
                   className={`text-2xl font-black text-slate-900 tabular-nums ${(acc as any).is_hidden && !isUnlocked ? 'blur-sm select-none cursor-pointer' : ''}`}
                   onClick={(acc as any).is_hidden && !isUnlocked ? () => requestUnlock() : undefined}
                 >
@@ -197,12 +209,13 @@ export function AccountsClient({
                 </div>
               </div>
 
+              {/* Vaults Section */}
               <div className="bg-slate-50/50 flex-1 p-4 rounded-b-2xl border-t border-slate-100">
                 <div className="flex justify-between items-center mb-3">
                   <h4 className="text-xs font-bold text-slate-500 uppercase tracking-wider">Cofrinhos</h4>
                   <button
                     onClick={() => { setSelectedAccountId(acc.id); setIsVaultModalOpen(true) }}
-                    className="text-xs font-semibold text-emerald-600 bg-emerald-50 px-2 py-1 rounded-md hover:bg-emerald-100 transition-colors flex items-center gap-1"
+                    className="text-xs font-semibold text-emerald-600 bg-emerald-50 px-2 py-1 rounded-md hover:bg-emerald-100 transition-colors flex items-center gap-1 cursor-pointer"
                   >
                     <Plus className="w-3 h-3" /> Adicionar
                   </button>
@@ -212,9 +225,10 @@ export function AccountsClient({
                   <div className="flex flex-col gap-2">
                     {acc.account_vaults.map(vault => (
                       <div key={vault.id} className="flex flex-col bg-white border border-slate-100 rounded-xl p-3 shadow-sm hover:border-emerald-100 transition-colors">
-                        <div className="flex flex-wrap justify-between items-start gap-2 mb-2">
+                        {/* Vault top row: icon + name + action buttons */}
+                        <div className="flex justify-between items-center gap-2 mb-2">
                           <div className="flex items-center gap-2 min-w-0">
-                            <div 
+                            <div
                               className="w-7 h-7 shrink-0 rounded-full flex items-center justify-center text-sm"
                               style={{ backgroundColor: vault.color ? `${vault.color}20` : '#f1f5f9' }}
                             >
@@ -228,46 +242,56 @@ export function AccountsClient({
                             <button
                               onClick={() => handleToggleVaultHidden(vault.id, !!(vault as any).is_hidden)}
                               disabled={isPending}
-                              className="w-6 h-6 flex items-center justify-center rounded text-slate-400 hover:bg-slate-100 hover:text-slate-600 transition-colors"
+                              className="w-6 h-6 flex items-center justify-center rounded text-slate-400 hover:bg-slate-100 hover:text-slate-600 transition-colors cursor-pointer"
                               title={(vault as any).is_hidden ? "Mostrar Cofrinho" : "Ocultar Cofrinho"}
                             >
                               {(vault as any).is_hidden ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
                             </button>
                             <button
-                              onClick={() => { setEditVaultTarget(vault); setIsEditVaultModalOpen(true) }}
-                              className="w-6 h-6 flex items-center justify-center rounded text-slate-400 hover:bg-slate-100 hover:text-emerald-600 transition-colors"
+                              onClick={() => withVaultPrivacy(vault, () => setHistoryVault(vault))}
+                              className="w-6 h-6 flex items-center justify-center rounded text-slate-400 hover:bg-slate-100 hover:text-indigo-600 transition-colors cursor-pointer"
+                              title="Ver Extrato do Cofrinho"
+                            >
+                              <History className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              onClick={() => withVaultPrivacy(vault, () => { setEditVaultTarget(vault); setIsEditVaultModalOpen(true) })}
+                              className="w-6 h-6 flex items-center justify-center rounded text-slate-400 hover:bg-slate-100 hover:text-emerald-600 transition-colors cursor-pointer"
                               title="Editar Cofrinho"
                             >
                               <Edit3 className="w-3.5 h-3.5" />
                             </button>
                             <button
-                              onClick={() => handleDeleteVault(vault.id)}
+                              onClick={() => withVaultPrivacy(vault, () => handleDeleteVault(vault.id))}
                               disabled={isPending}
-                              className="w-6 h-6 flex items-center justify-center rounded text-slate-400 hover:bg-rose-50 hover:text-rose-500 transition-colors"
+                              className="w-6 h-6 flex items-center justify-center rounded text-slate-400 hover:bg-rose-50 hover:text-rose-500 transition-colors cursor-pointer"
                               title="Excluir Cofrinho"
                             >
                               <Trash2 className="w-3.5 h-3.5" />
                             </button>
                           </div>
                         </div>
-                        <div className="flex justify-between items-end">
-                          <div 
-                            className={`text-sm font-bold text-slate-700 tabular-nums ${(vault as any).is_hidden && !isUnlocked ? 'blur-sm select-none cursor-pointer' : ''}`}
-                            onClick={(vault as any).is_hidden && !isUnlocked ? () => requestUnlock() : undefined}
+
+                        {/* Vault bottom row: balance + deposit/withdraw buttons */}
+                        <div className="flex justify-between items-center">
+                          <div
+                            className={`text-sm font-bold text-slate-700 tabular-nums cursor-pointer hover:text-indigo-600 transition-colors ${(vault as any).is_hidden && !isUnlocked ? 'blur-sm select-none' : ''}`}
+                            onClick={() => withVaultPrivacy(vault, () => setHistoryVault(vault))}
+                            title="Clique para ver o extrato"
                           >
                             {(vault as any).is_hidden && !isUnlocked ? '••••' : currencyFmt.format(vault.balance)}
                           </div>
                           <div className="flex items-center gap-1">
                             <button
-                              onClick={() => { setVaultActionState({ id: vault.id, type: 'withdraw' }); setIsVaultActionModalOpen(true) }}
-                              className="w-7 h-7 flex items-center justify-center rounded-lg text-rose-500 bg-rose-50 hover:bg-rose-100 transition-colors font-bold"
+                              onClick={() => withVaultPrivacy(vault, () => { setVaultActionState({ id: vault.id, type: 'withdraw' }); setIsVaultActionModalOpen(true) })}
+                              className="w-7 h-7 flex items-center justify-center rounded-lg text-rose-500 bg-rose-50 hover:bg-rose-100 transition-colors font-bold cursor-pointer"
                               title="Resgatar"
                             >
                               -
                             </button>
                             <button
-                              onClick={() => { setVaultActionState({ id: vault.id, type: 'deposit' }); setIsVaultActionModalOpen(true) }}
-                              className="w-7 h-7 flex items-center justify-center rounded-lg text-emerald-500 bg-emerald-50 hover:bg-emerald-100 transition-colors font-bold"
+                              onClick={() => withVaultPrivacy(vault, () => { setVaultActionState({ id: vault.id, type: 'deposit' }); setIsVaultActionModalOpen(true) })}
+                              className="w-7 h-7 flex items-center justify-center rounded-lg text-emerald-500 bg-emerald-50 hover:bg-emerald-100 transition-colors font-bold cursor-pointer"
                               title="Guardar"
                             >
                               +
@@ -278,16 +302,13 @@ export function AccountsClient({
                     ))}
                   </div>
                 ) : (
-                  <div className="text-xs text-slate-400 text-center py-4">Nenhum cofrinho nesta conta.</div>
+                  <div className="text-center py-6 text-xs text-slate-400 border border-dashed border-slate-200 rounded-xl">
+                    Nenhum cofrinho vinculado
+                  </div>
                 )}
               </div>
             </div>
           ))}
-          {accounts.length === 0 && (
-            <div className="col-span-full p-8 text-center text-slate-400">
-              Você ainda não tem nenhuma conta.
-            </div>
-          )}
         </div>
       </motion.div>
 
@@ -296,31 +317,35 @@ export function AccountsClient({
         <AccountForm workspaceId={workspaceId!} onSuccess={() => setIsAccountModalOpen(false)} />
       </Modal>
 
-      {/* Vault Creation Modal */}
-      <Modal isOpen={isVaultModalOpen} onClose={() => setIsVaultModalOpen(false)} title="Novo Cofrinho">
-        {selectedAccountId && <VaultForm accountId={selectedAccountId} onSuccess={() => setIsVaultModalOpen(false)} />}
-      </Modal>
-
-      {/* Vault Action (Deposit/Withdraw) Modal */}
-      <Modal isOpen={isVaultActionModalOpen} onClose={() => setIsVaultActionModalOpen(false)} title={vaultActionState?.type === 'deposit' ? 'Guardar Dinheiro' : 'Resgatar Dinheiro'}>
-        {vaultActionState && (
-          <VaultActionForm 
-            vaultId={vaultActionState.id} 
-            actionType={vaultActionState.type} 
-            categories={categories}
-            onSuccess={() => setIsVaultActionModalOpen(false)} 
-          />
-        )}
-      </Modal>
-
-      {/* Account Edit Meta Modal */}
+      {/* Account Meta Edit Modal */}
       <Modal isOpen={isEditAccMetaModalOpen} onClose={() => setIsEditAccMetaModalOpen(false)} title="Editar Conta">
         {editAccMetaTarget && (
           <AccountForm workspaceId={workspaceId!} initialData={editAccMetaTarget} onSuccess={() => setIsEditAccMetaModalOpen(false)} />
         )}
       </Modal>
 
-      {/* Account Edit Balance Modal */}
+      {/* Vault Creation Modal */}
+      <Modal isOpen={isVaultModalOpen} onClose={() => setIsVaultModalOpen(false)} title="Novo Cofrinho">
+        {selectedAccountId && <VaultForm accountId={selectedAccountId} onSuccess={() => setIsVaultModalOpen(false)} />}
+      </Modal>
+
+      {/* Vault Action (Deposit/Withdraw) Modal */}
+      <Modal
+        isOpen={isVaultActionModalOpen}
+        onClose={() => setIsVaultActionModalOpen(false)}
+        title={vaultActionState?.type === 'deposit' ? 'Guardar Dinheiro' : 'Resgatar Dinheiro'}
+      >
+        {vaultActionState && (
+          <VaultActionForm
+            vaultId={vaultActionState.id}
+            actionType={vaultActionState.type}
+            categories={categories}
+            onSuccess={() => setIsVaultActionModalOpen(false)}
+          />
+        )}
+      </Modal>
+
+      {/* Account Balance Adjustment Modal */}
       <Modal isOpen={isEditAccModalOpen} onClose={() => setIsEditAccModalOpen(false)} title="Ajustar Saldo da Conta">
         {editAccTarget && (
           <form action={handleEditAccountBalance} className="flex flex-col gap-4">
@@ -335,7 +360,6 @@ export function AccountsClient({
                 type="text"
                 name="initial_balance"
                 inputMode="numeric"
-                pattern="[0-9]*"
                 defaultValue={editAccTarget.initial_balance.toString().replace('.', ',')}
                 required
                 className="w-full px-4 py-3 rounded-xl border border-slate-200 bg-slate-50/50 text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500/20"
@@ -352,6 +376,16 @@ export function AccountsClient({
           <VaultForm accountId={editVaultTarget.account_id} initialData={editVaultTarget} onSuccess={() => setIsEditVaultModalOpen(false)} />
         )}
       </Modal>
+
+      {/* Vault History / Extrato Modal */}
+      <VaultHistoryModal
+        vault={historyVault}
+        onClose={() => setHistoryVault(null)}
+        onOpenAction={(vaultId, actionType) => {
+          setVaultActionState({ id: vaultId, type: actionType })
+          setIsVaultActionModalOpen(true)
+        }}
+      />
     </div>
   )
 }

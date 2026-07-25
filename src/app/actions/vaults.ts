@@ -2,6 +2,7 @@
 
 import { revalidatePath } from 'next/cache'
 import { createClient } from '@/lib/supabase/server'
+import { parseCurrency, parseNullableCurrency, parseBoolean } from './utils'
 
 export async function createVault(prevState: any, formData: FormData) {
   const supabase = await createClient()
@@ -9,34 +10,40 @@ export async function createVault(prevState: any, formData: FormData) {
   const account_id = formData.get('account_id') as string
   if (!account_id) return { error: 'Conta não identificada.' }
 
-  const targetStr = formData.get('target_amount') as string
-  const targetAmount = targetStr ? parseFloat(targetStr.replace(/[^\d,-]/g, '').replace(',', '.')) : null
+  const name = formData.get('name') as string
+  if (!name) return { error: 'Preencha o nome do cofrinho.' }
 
-  const balanceStr = formData.get('balance') as string
-  const initialBalance = balanceStr ? parseFloat(balanceStr.replace(/[^\d,-]/g, '').replace(',', '.')) : 0
+  const initialBalance = parseCurrency(formData.get('balance'))
 
   const data = {
     account_id,
-    name: formData.get('name') as string,
-    target_amount: targetAmount && !isNaN(targetAmount) ? targetAmount : null,
-    balance: isNaN(initialBalance) ? 0 : initialBalance,
+    name,
+    target_amount: parseNullableCurrency(formData.get('target_amount')),
+    balance: initialBalance,
     icon: formData.get('icon') as string,
     color: formData.get('color') as string,
-    include_in_dashboard: formData.get('include_in_dashboard') === 'true',
-    is_hidden: formData.get('is_hidden') === 'true'
+    include_in_dashboard: parseBoolean(formData.get('include_in_dashboard')),
+    is_hidden: parseBoolean(formData.get('is_hidden'))
   }
 
-  if (!data.name) {
-    return { error: 'Preencha o nome do cofrinho.' }
-  }
-
-  const { error } = await supabase
+  const { data: createdVault, error } = await supabase
     .from('account_vaults')
     .insert([data])
+    .select()
+    .single()
 
   if (error) {
     console.error('Erro ao criar cofrinho:', error)
     return { error: 'Ocorreu um erro ao salvar o cofrinho.' }
+  }
+
+  // Registrar saldo inicial como um aporte no histórico se for maior que zero
+  if (initialBalance > 0 && createdVault?.id) {
+    await supabase.from('vault_transactions').insert([{
+      vault_id: createdVault.id,
+      action: 'deposit',
+      amount: initialBalance
+    }])
   }
 
   revalidatePath('/', 'layout')
@@ -48,37 +55,24 @@ export async function updateVault(prevState: any, formData: FormData) {
 
   const id = formData.get('id') as string
   const name = formData.get('name') as string
-  const icon = formData.get('icon') as string
-  const color = formData.get('color') as string
+  if (!id || !name) return { error: 'Preencha o nome do cofrinho.' }
 
-  if (!id || !name) {
-    return { error: 'Preencha o nome do cofrinho.' }
-  }
-
-  const targetStr = formData.get('target_amount') as string
-  const targetAmount = targetStr ? parseFloat(targetStr.replace(/[^\d,-]/g, '').replace(',', '.')) : null
-
-  const balanceStr = formData.get('balance') as string
-  const balance = balanceStr ? parseFloat(balanceStr.replace(/[^\d,-]/g, '').replace(',', '.')) : null
+  const balance = parseNullableCurrency(formData.get('balance'))
 
   const data: any = {
     name,
-    icon,
-    color,
-    target_amount: targetAmount && !isNaN(targetAmount) ? targetAmount : null,
-    include_in_dashboard: formData.get('include_in_dashboard') === 'true',
-    is_hidden: formData.get('is_hidden') === 'true'
+    icon: formData.get('icon') as string,
+    color: formData.get('color') as string,
+    target_amount: parseNullableCurrency(formData.get('target_amount')),
+    include_in_dashboard: parseBoolean(formData.get('include_in_dashboard')),
+    is_hidden: parseBoolean(formData.get('is_hidden'))
   }
 
-  if (balance !== null && !isNaN(balance)) {
+  if (balance !== null) {
     data.balance = balance
   }
 
-  const { error } = await supabase
-    .from('account_vaults')
-    .update(data)
-    .eq('id', id)
-
+  const { error } = await supabase.from('account_vaults').update(data).eq('id', id)
   if (error) {
     console.error('Erro ao atualizar cofrinho:', error)
     return { error: 'Ocorreu um erro ao atualizar o cofrinho.' }
@@ -93,36 +87,30 @@ export async function transferToVault(prevState: any, formData: FormData) {
 
   const vault_id = formData.get('vault_id') as string
   const action = formData.get('action') as 'deposit' | 'withdraw'
-  const amountStr = formData.get('amount') as string
-  const amount = amountStr ? parseFloat(amountStr.replace(/[^\d,-]/g, '').replace(',', '.')) : 0
-  const createTx = formData.get('create_transaction') === 'true'
+  const amount = parseCurrency(formData.get('amount'))
+  const createTx = parseBoolean(formData.get('create_transaction'))
   const category_id = formData.get('category_id') as string
 
-  if (!vault_id || !action || isNaN(amount) || amount <= 0) {
+  if (!vault_id || !action || amount <= 0) {
     return { error: 'Dados inválidos para a transferência.' }
   }
 
-  // Obter o cofrinho atual e a conta
   const { data: vault, error: fetchError } = await supabase
     .from('account_vaults')
     .select('*, account:accounts(id, workspace_id, initial_balance)')
     .eq('id', vault_id)
     .single()
 
-  if (fetchError || !vault) {
-    return { error: 'Cofrinho não encontrado.' }
-  }
+  if (fetchError || !vault) return { error: 'Cofrinho não encontrado.' }
 
   const accountObj = vault.account as any
-  const accountInitialBalance = Number(accountObj.initial_balance)
+  const accountInitialBalance = Number(accountObj.initial_balance) || 0
 
-  if (action === 'deposit') {
-    if (amount > accountInitialBalance) {
-      return { error: 'Saldo disponível insuficiente na conta para este depósito.' }
-    }
+  if (action === 'deposit' && amount > accountInitialBalance) {
+    return { error: 'Saldo disponível insuficiente na conta para este depósito.' }
   }
 
-  let newVaultBalance = Number(vault.balance)
+  let newVaultBalance = Number(vault.balance) || 0
   let newAccountBalance = accountInitialBalance
 
   if (action === 'deposit') {
@@ -134,7 +122,6 @@ export async function transferToVault(prevState: any, formData: FormData) {
     newAccountBalance += amount
   }
 
-  // Atualiza saldo do cofrinho
   const { error: updateVaultError } = await supabase
     .from('account_vaults')
     .update({ balance: newVaultBalance })
@@ -145,20 +132,21 @@ export async function transferToVault(prevState: any, formData: FormData) {
     return { error: 'Erro ao processar a transferência.' }
   }
 
-  // Atualiza saldo da conta
-  const { error: updateAccountError } = await supabase
+  await supabase
     .from('accounts')
     .update({ initial_balance: newAccountBalance })
     .eq('id', accountObj.id)
-    
-  if (updateAccountError) {
-    console.error('Erro ao atualizar saldo da conta:', updateAccountError)
-  }
 
-  // Criar transação de aporte para contabilizar como investimento no Planejamento
+  // Registrar histórico do cofrinho em vault_transactions
+  await supabase.from('vault_transactions').insert([{
+    vault_id,
+    action,
+    amount
+  }])
+
   if (action === 'deposit' && createTx && category_id) {
     const today = new Date().toISOString().split('T')[0]
-    const { error: txError } = await supabase.from('transactions').insert([{
+    await supabase.from('transactions').insert([{
       workspace_id: accountObj.workspace_id,
       account_id: accountObj.id,
       category_id,
@@ -169,10 +157,6 @@ export async function transferToVault(prevState: any, formData: FormData) {
       status: 'posted',
       ignore_in_cashflow: false
     }])
-
-    if (txError) {
-      console.error('Erro ao registrar transação de aporte:', txError)
-    }
   }
 
   revalidatePath('/', 'layout')
@@ -181,17 +165,11 @@ export async function transferToVault(prevState: any, formData: FormData) {
 
 export async function deleteVault(id: string) {
   const supabase = await createClient()
-
-  const { error } = await supabase
-    .from('account_vaults')
-    .delete()
-    .eq('id', id)
-
+  const { error } = await supabase.from('account_vaults').delete().eq('id', id)
   if (error) {
     console.error('Erro ao deletar cofrinho:', error)
     return { error: 'Erro ao excluir o cofrinho.' }
   }
-
   revalidatePath('/', 'layout')
   return { success: 'Cofrinho excluído com sucesso!' }
 }
@@ -200,40 +178,37 @@ export async function editVaultBalance(prevState: any, formData: FormData) {
   const supabase = await createClient()
 
   const id = formData.get('id') as string
-  const balanceStr = formData.get('balance') as string
-  const newBalance = balanceStr ? parseFloat(balanceStr.replace(/[^\d,-]/g, '').replace(',', '.')) : null
-  const workspace_id = formData.get('workspace_id') as string
+  const newBalance = parseNullableCurrency(formData.get('balance'))
 
-  if (!id || newBalance === null || isNaN(newBalance)) {
-    return { error: 'Valor inválido.' }
-  }
+  if (!id || newBalance === null) return { error: 'Valor inválido.' }
 
-  // Obter saldo atual do cofrinho
   const { data: vault, error: fetchError } = await supabase
     .from('account_vaults')
-    .select('*, account:accounts(id, initial_balance)')
+    .select('balance')
     .eq('id', id)
     .single()
 
   if (fetchError || !vault) return { error: 'Cofrinho não encontrado.' }
 
-  const oldBalance = Number(vault.balance)
+  const oldBalance = Number(vault.balance) || 0
   const diff = newBalance - oldBalance
 
   if (diff === 0) {
     return { error: 'O valor informado é o mesmo do atual.' }
   }
 
-  // Atualizar saldo do cofrinho (sem afetar o saldo bruto da conta)
-  const { error } = await supabase
-    .from('account_vaults')
-    .update({ balance: newBalance })
-    .eq('id', id)
-
+  const { error } = await supabase.from('account_vaults').update({ balance: newBalance }).eq('id', id)
   if (error) {
     console.error('Erro ao atualizar saldo do cofrinho:', error)
     return { error: 'Erro ao atualizar o cofrinho.' }
   }
+
+  // Registrar no histórico de transações do cofrinho
+  await supabase.from('vault_transactions').insert([{
+    vault_id: id,
+    action: diff > 0 ? 'deposit' : 'withdraw',
+    amount: Math.abs(diff)
+  }])
 
   revalidatePath('/', 'layout')
   return { success: 'Saldo do cofrinho ajustado com sucesso!' }
@@ -241,14 +216,24 @@ export async function editVaultBalance(prevState: any, formData: FormData) {
 
 export async function toggleVaultHidden(id: string, is_hidden: boolean) {
   const supabase = await createClient()
-  const { error } = await supabase
-    .from('account_vaults')
-    .update({ is_hidden })
-    .eq('id', id)
-    
-  if (error) {
-    return { error: 'Erro ao alternar visibilidade do cofrinho.' }
-  }
+  const { error } = await supabase.from('account_vaults').update({ is_hidden }).eq('id', id)
+  if (error) return { error: 'Erro ao alternar visibilidade do cofrinho.' }
   revalidatePath('/', 'layout')
   return { success: 'Visibilidade atualizada!' }
+}
+
+export async function getVaultHistory(vaultId: string) {
+  const supabase = await createClient()
+  const { data, error } = await supabase
+    .from('vault_transactions')
+    .select('*')
+    .eq('vault_id', vaultId)
+    .order('created_at', { ascending: false })
+
+  if (error) {
+    console.error('Erro ao buscar histórico do cofrinho:', error)
+    return { error: 'Não foi possível carregar o histórico.' }
+  }
+
+  return { history: data || [] }
 }

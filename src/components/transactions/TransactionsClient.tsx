@@ -5,12 +5,13 @@ import { motion, AnimatePresence } from 'framer-motion'
 import {
   Plus, Search, TrendingUp, TrendingDown, ArrowRightLeft,
   Trash2, CalendarDays, ChevronLeft, ChevronRight, EyeOff,
-  CreditCard, ChevronDown, ChevronUp, CheckCircle2
+  CreditCard, ChevronDown, ChevronUp, CheckCircle2, Edit2, RotateCcw,
+  Sparkles, Layers
 } from 'lucide-react'
 import { Modal } from '@/components/ui/Modal'
 import { CustomSelect } from '@/components/ui/CustomSelect'
 import { TransactionForm } from './TransactionForm'
-import { deleteTransaction, markAsPosted } from '@/app/actions/transactions'
+import { deleteTransaction, markAsPosted, unpayTransaction } from '@/app/actions/transactions'
 import { getCreditCardCycles } from '@/lib/creditCardUtils'
 import { toast } from 'sonner'
 
@@ -24,6 +25,8 @@ type Transaction = {
   category_id?: string
   account_id?: string
   destination_account_id?: string
+  installment_id?: string
+  is_recurring?: boolean
   ignore_in_cashflow?: boolean
   category?: { id: string; name: string; icon?: string; color?: string } | null
   account?: { id: string; name: string; type?: string } | null
@@ -37,7 +40,17 @@ const MONTHS = [
   'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'
 ]
 
-function InvoiceRow({ invoice, onDelete, isPending }: { invoice: any, onDelete: (id: string) => void, isPending: boolean }) {
+function InvoiceRow({ 
+  invoice, 
+  onSelect,
+  onDelete, 
+  isPending 
+}: { 
+  invoice: any, 
+  onSelect: (t: Transaction) => void,
+  onDelete: (id: string) => void, 
+  isPending: boolean 
+}) {
   const [expanded, setExpanded] = useState(true)
   return (
     <div className="border-b border-slate-100 bg-slate-50/40 rounded-xl my-2 mx-2 sm:mx-3 border overflow-hidden shadow-2xs">
@@ -79,7 +92,11 @@ function InvoiceRow({ invoice, onDelete, isPending }: { invoice: any, onDelete: 
           >
             <div className="px-4 sm:px-5 py-2 flex flex-col divide-y divide-slate-100/70">
               {[...invoice.transactions].sort((a,b) => new Date(b.date).getTime() - new Date(a.date).getTime()).map(t => (
-                <div key={t.id} className="flex items-center justify-between py-2.5 group">
+                <div 
+                  key={t.id} 
+                  onClick={() => onSelect(t)}
+                  className="flex items-center justify-between py-2.5 group cursor-pointer hover:bg-slate-50/80 -mx-2 px-2 rounded-lg transition-colors"
+                >
                   <div className="flex items-center gap-3 flex-1 min-w-0">
                     <div className="w-8 h-8 rounded-lg bg-slate-100 flex items-center justify-center shrink-0">
                       {t.category?.icon ? (
@@ -89,7 +106,12 @@ function InvoiceRow({ invoice, onDelete, isPending }: { invoice: any, onDelete: 
                       )}
                     </div>
                     <div className="min-w-0 flex-1">
-                      <div className="text-xs sm:text-sm font-bold text-slate-800 truncate">{t.description}</div>
+                      <div className="text-xs sm:text-sm font-bold text-slate-800 truncate flex items-center gap-1.5">
+                        {t.description}
+                        {t.installment_id && (
+                          <span className="px-1.5 py-0.2 rounded text-[9px] font-bold bg-slate-100 text-slate-600 shrink-0">Parcelado</span>
+                        )}
+                      </div>
                       <div className="text-[11px] text-slate-400 font-medium truncate">
                         {t.category?.name || 'Sem Categoria'} · {new Date(t.date + 'T12:00:00').toLocaleDateString('pt-BR')}
                       </div>
@@ -99,13 +121,23 @@ function InvoiceRow({ invoice, onDelete, isPending }: { invoice: any, onDelete: 
                     <span className={`text-xs sm:text-sm font-bold tabular-nums whitespace-nowrap ${t.ignore_in_cashflow ? 'text-slate-400 line-through' : 'text-rose-600'}`}>
                       - {currencyFmt.format(Number(t.amount))}
                     </span>
-                    <button
-                      onClick={(e) => { e.stopPropagation(); onDelete(t.id); }}
-                      disabled={isPending}
-                      className="opacity-100 lg:opacity-0 lg:group-hover:opacity-100 p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-100 rounded-lg transition-all disabled:opacity-50"
-                    >
-                      <Trash2 className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
-                    </button>
+                    <div className="flex items-center gap-1 opacity-100 lg:opacity-0 lg:group-hover:opacity-100 transition-opacity">
+                      <button
+                        onClick={(e) => { e.stopPropagation(); onSelect(t); }}
+                        className="p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-all"
+                        title="Editar / Ver Detalhes"
+                      >
+                        <Edit2 className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+                      </button>
+                      <button
+                        onClick={(e) => { e.stopPropagation(); onDelete(t.id); }}
+                        disabled={isPending}
+                        className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-100 rounded-lg transition-all disabled:opacity-50"
+                        title="Excluir"
+                      >
+                        <Trash2 className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+                      </button>
+                    </div>
                   </div>
                 </div>
               ))}
@@ -117,14 +149,29 @@ function InvoiceRow({ invoice, onDelete, isPending }: { invoice: any, onDelete: 
   )
 }
 
-function TransactionRow({ t, onDelete, onMarkPosted, isPending }: { t: any, onDelete: (id: string) => void, onMarkPosted: (id: string) => void, isPending: boolean }) {
+function TransactionRow({ 
+  t, 
+  onSelect,
+  onDelete, 
+  onMarkPosted, 
+  onUnpay,
+  isPending 
+}: { 
+  t: any, 
+  onSelect: (t: Transaction) => void,
+  onDelete: (id: string) => void, 
+  onMarkPosted: (id: string) => void, 
+  onUnpay: (id: string) => void,
+  isPending: boolean 
+}) {
   const isIncome = t.type === 'income'
   const isTransfer = t.type === 'transfer'
   const isPlanned = t.status === 'pending'
   
   return (
     <div
-      className={`flex items-center justify-between px-4 sm:px-5 py-3 sm:py-3.5 border-b border-slate-50 hover:bg-slate-50/80 transition-colors group ${
+      onClick={() => onSelect(t)}
+      className={`flex items-center justify-between px-4 sm:px-5 py-3 sm:py-3.5 border-b border-slate-50 cursor-pointer hover:bg-slate-100/70 transition-all group ${
         isPlanned ? 'border-l-2 border-l-amber-400 bg-amber-50/20 hover:bg-amber-50/40' : ''
       }`}
     >
@@ -150,6 +197,11 @@ function TransactionRow({ t, onDelete, onMarkPosted, isPending }: { t: any, onDe
                 <CalendarDays className="w-3 h-3" /> Planejado
               </span>
             )}
+            {t.installment_id && (
+              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-purple-100 text-purple-700 shrink-0">
+                <Layers className="w-3 h-3" /> Parcelado
+              </span>
+            )}
             {t.ignore_in_cashflow && (
               <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-slate-100 text-slate-500 shrink-0">
                 <EyeOff className="w-3 h-3" /> Ignorado
@@ -162,6 +214,7 @@ function TransactionRow({ t, onDelete, onMarkPosted, isPending }: { t: any, onDe
           </div>
         </div>
       </div>
+
       <div className="flex items-center gap-2 sm:gap-3 ml-2 sm:ml-4">
         <div className={`font-bold text-xs sm:text-sm tabular-nums whitespace-nowrap ${
           t.ignore_in_cashflow ? 'text-slate-400 line-through' :
@@ -171,19 +224,37 @@ function TransactionRow({ t, onDelete, onMarkPosted, isPending }: { t: any, onDe
           {isIncome ? '+' : isTransfer ? '' : '-'} {currencyFmt.format(Number(t.amount))}
         </div>
         
-        <div className="flex items-center opacity-100 lg:opacity-0 lg:group-hover:opacity-100 transition-opacity">
-          {isPlanned && (
+        <div className="flex items-center gap-1 opacity-100 lg:opacity-0 lg:group-hover:opacity-100 transition-opacity">
+          {isPlanned ? (
             <button
-              onClick={() => onMarkPosted(t.id)}
+              onClick={(e) => { e.stopPropagation(); onMarkPosted(t.id); }}
               disabled={isPending}
-              className="p-1.5 text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg transition-all mr-1 disabled:opacity-50"
-              title="Marcar como Paga"
+              className="p-1.5 text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg transition-all disabled:opacity-50"
+              title="Marcar como Efetivada / Paga"
             >
               <CheckCircle2 className="w-4 h-4" />
             </button>
+          ) : (
+            <button
+              onClick={(e) => { e.stopPropagation(); onUnpay(t.id); }}
+              disabled={isPending}
+              className="p-1.5 text-slate-400 hover:text-amber-600 hover:bg-amber-50 rounded-lg transition-all disabled:opacity-50"
+              title="Voltar para Pendente / Planejado"
+            >
+              <RotateCcw className="w-4 h-4" />
+            </button>
           )}
+
           <button
-            onClick={() => onDelete(t.id)}
+            onClick={(e) => { e.stopPropagation(); onSelect(t); }}
+            className="p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-all"
+            title="Editar / Detalhes"
+          >
+            <Edit2 className="w-4 h-4" />
+          </button>
+
+          <button
+            onClick={(e) => { e.stopPropagation(); onDelete(t.id); }}
             disabled={isPending}
             className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-all disabled:opacity-50"
             title="Excluir"
@@ -208,6 +279,8 @@ export function TransactionsClient({
   accounts: Account[]
 }) {
   const [isTxModalOpen, setIsTxModalOpen] = useState(false)
+  const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null)
+  
   const [search, setSearch] = useState('')
   const [typeFilter, setTypeFilter] = useState<'all' | 'income' | 'expense' | 'transfer'>('all')
   const [categoryFilter, setCategoryFilter] = useState('all')
@@ -297,6 +370,14 @@ export function TransactionsClient({
     })
   }
 
+  const handleUnpay = (id: string) => {
+    startTransition(async () => {
+      const res = await unpayTransaction(id)
+      if (res?.error) toast.error(res.error)
+      else toast.success(res.success || 'Transação desmarcada!')
+    })
+  }
+
   const prevMonth = () => {
     if (selectedMonth === 0) { setSelectedMonth(11); setSelectedYear(y => y - 1) }
     else setSelectedMonth(m => m - 1)
@@ -350,13 +431,16 @@ export function TransactionsClient({
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 gap-4">
         <div>
           <h1 className="text-2xl font-black text-slate-900">Transações</h1>
-          <p className="text-sm text-slate-500 mt-1">Gerencie todas as suas movimentações financeiras.</p>
+          <p className="text-sm text-slate-500 mt-1">Gerencie todas as suas movimentações financeiras. Clique em qualquer item para ver detalhes ou editar.</p>
         </div>
         <motion.button
           whileHover={{ scale: 1.03, y: -1 }}
           whileTap={{ scale: 0.97 }}
-          onClick={() => setIsTxModalOpen(true)}
-          className="btn-primary flex items-center gap-2 shadow-lg shadow-emerald-500/20"
+          onClick={() => {
+            setEditingTransaction(null)
+            setIsTxModalOpen(true)
+          }}
+          className="btn-primary flex items-center gap-2 shadow-lg shadow-emerald-500/20 cursor-pointer"
         >
           <Plus className="w-5 h-5" /> Nova Transação
         </motion.button>
@@ -364,14 +448,14 @@ export function TransactionsClient({
 
       <div className="glass-panel rounded-2xl p-4 mb-6 flex flex-col lg:flex-row justify-between items-center gap-4">
         <div className="flex items-center gap-3 w-full lg:w-auto justify-between lg:justify-start">
-          <button onClick={prevMonth} className="p-2 hover:bg-slate-100 rounded-lg transition-colors">
+          <button onClick={prevMonth} className="p-2 hover:bg-slate-100 rounded-lg transition-colors cursor-pointer">
             <ChevronLeft className="w-5 h-5 text-slate-600" />
           </button>
           <div className="text-center min-w-[140px]">
             <span className="font-bold text-slate-800">{MONTHS[selectedMonth]}</span>{' '}
             <span className="text-slate-500">{selectedYear}</span>
           </div>
-          <button onClick={nextMonth} className="p-2 hover:bg-slate-100 rounded-lg transition-colors">
+          <button onClick={nextMonth} className="p-2 hover:bg-slate-100 rounded-lg transition-colors cursor-pointer">
             <ChevronRight className="w-5 h-5 text-slate-600" />
           </button>
         </div>
@@ -394,9 +478,8 @@ export function TransactionsClient({
         </div>
       </div>
 
-      {/* Barra de Filtros Avançados e Elegantes */}
+      {/* Barra de Filtros Avançados */}
       <div className="glass-panel p-3.5 rounded-2xl mb-6 flex flex-col lg:flex-row items-stretch lg:items-center gap-3">
-        {/* Input de Busca */}
         <div className="relative flex-1">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
           <input
@@ -409,14 +492,13 @@ export function TransactionsClient({
           {search && (
             <button 
               onClick={() => setSearch('')}
-              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 text-xs font-bold p-1"
+              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 text-xs font-bold p-1 cursor-pointer"
             >
               ✕
             </button>
           )}
         </div>
 
-        {/* Filtro por Categoria */}
         <CustomSelect
           value={categoryFilter}
           onChange={setCategoryFilter}
@@ -425,7 +507,6 @@ export function TransactionsClient({
           className="shrink-0 w-full sm:w-[190px]"
         />
 
-        {/* Filtro por Conta */}
         <CustomSelect
           value={accountFilter}
           onChange={setAccountFilter}
@@ -434,13 +515,12 @@ export function TransactionsClient({
           className="shrink-0 w-full sm:w-[170px]"
         />
 
-        {/* Filtro por Tipo */}
         <div className="flex bg-slate-100 p-1 rounded-xl shrink-0 overflow-x-auto">
           {(['all', 'income', 'expense', 'transfer'] as const).map(f => (
             <button
               key={f}
               onClick={() => setTypeFilter(f)}
-              className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all whitespace-nowrap ${
+              className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all whitespace-nowrap cursor-pointer ${
                 typeFilter === f
                   ? 'bg-white text-slate-800 shadow-xs'
                   : 'text-slate-500 hover:text-slate-700'
@@ -451,11 +531,10 @@ export function TransactionsClient({
           ))}
         </div>
 
-        {/* Botão de Limpar Filtros */}
         {hasActiveFilters && (
           <button
             onClick={clearAllFilters}
-            className="px-3 py-1.5 text-xs font-bold text-rose-600 hover:text-rose-700 bg-rose-50 hover:bg-rose-100 rounded-xl transition-all shrink-0 text-center"
+            className="px-3 py-1.5 text-xs font-bold text-rose-600 hover:text-rose-700 bg-rose-50 hover:bg-rose-100 rounded-xl transition-all shrink-0 text-center cursor-pointer"
           >
             Limpar Filtros
           </button>
@@ -479,12 +558,18 @@ export function TransactionsClient({
               key={`${selectedMonth}-${selectedYear}-${typeFilter}-${search}`}
               initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.2 }}
             >
-              {/* Cards MESTRE das Faturas dos Cartões de Crédito do Mês */}
+              {/* Cards MESTRE das Faturas dos Cartões de Crédito */}
               {processedItems.invoices.map(inv => (
-                <InvoiceRow key={inv.account.id} invoice={inv} onDelete={handleDelete} isPending={isPending} />
+                <InvoiceRow 
+                  key={inv.account.id} 
+                  invoice={inv} 
+                  onSelect={(t) => setEditingTransaction(t)}
+                  onDelete={handleDelete} 
+                  isPending={isPending} 
+                />
               ))}
 
-              {/* Transações de Contas Bancárias / Dinheiro organizadas por dia */}
+              {/* Transações normais organizadas por dia */}
               {processedItems.normalDates.map(([dateKey, list]) => (
                 <div key={dateKey}>
                   <div className="px-5 py-2.5 bg-slate-100/50 border-b border-slate-200">
@@ -496,7 +581,15 @@ export function TransactionsClient({
                   </div>
 
                   {list.map(t => (
-                    <TransactionRow key={t.id} t={t} onDelete={handleDelete} onMarkPosted={handleMarkAsPosted} isPending={isPending} />
+                    <TransactionRow 
+                      key={t.id} 
+                      t={t} 
+                      onSelect={(selected) => setEditingTransaction(selected)}
+                      onDelete={handleDelete} 
+                      onMarkPosted={handleMarkAsPosted} 
+                      onUnpay={handleUnpay}
+                      isPending={isPending} 
+                    />
                   ))}
                 </div>
               ))}
@@ -505,11 +598,35 @@ export function TransactionsClient({
         )}
       </div>
 
-      <Modal isOpen={isTxModalOpen} onClose={() => setIsTxModalOpen(false)} title="Nova Transação">
+      {/* Modal para Criar Nova Transação */}
+      <Modal 
+        isOpen={isTxModalOpen} 
+        onClose={() => setIsTxModalOpen(false)} 
+        title="Nova Transação"
+      >
         <TransactionForm
-          workspaceId={workspaceId} categories={categories} accounts={accounts}
+          workspaceId={workspaceId} 
+          categories={categories} 
+          accounts={accounts}
           onSuccess={() => setIsTxModalOpen(false)}
         />
+      </Modal>
+
+      {/* Modal Interativo para Editar / Ver Detalhes de uma Transação Existente */}
+      <Modal
+        isOpen={Boolean(editingTransaction)}
+        onClose={() => setEditingTransaction(null)}
+        title="Detalhes & Edição da Transação"
+      >
+        {editingTransaction && (
+          <TransactionForm
+            workspaceId={workspaceId}
+            categories={categories}
+            accounts={accounts}
+            initialData={editingTransaction}
+            onSuccess={() => setEditingTransaction(null)}
+          />
+        )}
       </Modal>
     </>
   )

@@ -337,22 +337,46 @@ export function PlannedClient({
   // Category Legend Data for HTML Legend Grid
   const categoryLegendData = useMemo(() => {
     const data: { id: string; name: string; icon: string; value: number; color: string; percent: number }[] = []
-    const palette = ['#6366f1', '#f59e0b', '#10b981', '#f43f5e', '#a855f7', '#06b6d4', '#ec4899', '#64748b']
+    const PALETTE = [
+      '#6366f1', // Indigo
+      '#f59e0b', // Amber
+      '#10b981', // Emerald
+      '#f43f5e', // Rose
+      '#8b5cf6', // Purple
+      '#06b6d4', // Cyan
+      '#ec4899', // Pink
+      '#3b82f6', // Blue
+      '#84cc16', // Lime
+      '#d97706', // Dark Amber
+      '#14b8a6', // Teal
+      '#a855f7', // Violet
+    ]
+
     let total = 0
     categories.forEach(c => {
       total += filteredSpentPerCategory[c.id] || 0
     })
     if (total === 0) total = 1
 
-    categories.forEach((c, idx) => {
+    const usedColors = new Set<string>()
+
+    categories.forEach((c) => {
       const val = filteredSpentPerCategory[c.id] || 0
       if (val > 0) {
+        let assignedColor = c.color || PALETTE[data.length % PALETTE.length]
+        const isGenericDefault = assignedColor.toLowerCase() === '#ef4444' || assignedColor.toLowerCase() === '#10b981'
+        
+        if (isGenericDefault || usedColors.has(assignedColor.toLowerCase())) {
+          assignedColor = PALETTE[data.length % PALETTE.length]
+        }
+        usedColors.add(assignedColor.toLowerCase())
+
         data.push({
           id: c.id,
           name: c.name,
           icon: c.icon || '📌',
           value: val,
-          color: c.color || palette[idx % palette.length],
+          color: assignedColor,
           percent: Math.round((val / total) * 100)
         })
       }
