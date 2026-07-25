@@ -61,7 +61,6 @@ export function VaultActionForm({ vaultId, actionType, categories = [], onSucces
             name="amount"
             type="text"
             inputMode="numeric"
-            pattern="[0-9]*"
             required
             value={amount}
             onChange={handleAmountChange}

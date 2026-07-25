@@ -58,7 +58,6 @@ export function PayInvoiceForm({ workspaceId, card, accounts, onSuccess }: PayIn
             name="amount"
             type="text"
             inputMode="decimal"
-            pattern="[0-9]*"
             required
             value={amount}
             onChange={handleAmountChange}
