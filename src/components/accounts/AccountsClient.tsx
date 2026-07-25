@@ -17,10 +17,12 @@ type Account = { id: string; name: string; type: string; initial_balance: number
 
 export function AccountsClient({
   workspaceId,
-  accounts
+  accounts,
+  categories = []
 }: {
   workspaceId?: string
   accounts: Account[]
+  categories?: any[]
 }) {
   const [isAccountModalOpen, setIsAccountModalOpen] = useState(false)
   const [isVaultModalOpen, setIsVaultModalOpen] = useState(false)
@@ -302,7 +304,12 @@ export function AccountsClient({
       {/* Vault Action (Deposit/Withdraw) Modal */}
       <Modal isOpen={isVaultActionModalOpen} onClose={() => setIsVaultActionModalOpen(false)} title={vaultActionState?.type === 'deposit' ? 'Guardar Dinheiro' : 'Resgatar Dinheiro'}>
         {vaultActionState && (
-          <VaultActionForm vaultId={vaultActionState.id} actionType={vaultActionState.type} onSuccess={() => setIsVaultActionModalOpen(false)} />
+          <VaultActionForm 
+            vaultId={vaultActionState.id} 
+            actionType={vaultActionState.type} 
+            categories={categories}
+            onSuccess={() => setIsVaultActionModalOpen(false)} 
+          />
         )}
       </Modal>
 
@@ -327,6 +334,8 @@ export function AccountsClient({
               <input
                 type="text"
                 name="initial_balance"
+                inputMode="numeric"
+                pattern="[0-9]*"
                 defaultValue={editAccTarget.initial_balance.toString().replace('.', ',')}
                 required
                 className="w-full px-4 py-3 rounded-xl border border-slate-200 bg-slate-50/50 text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500/20"

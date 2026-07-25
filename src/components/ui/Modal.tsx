@@ -42,14 +42,14 @@ export function Modal({ isOpen, onClose, title, children }: ModalProps) {
   return createPortal(
     <AnimatePresence>
       {isOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-0">
+        <div className="fixed inset-0 z-[100000] flex items-center justify-center p-4 sm:p-0">
           {/* Backdrop Blur */}
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             transition={{ duration: 0.2 }}
-            className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm"
+            className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-[100000]"
             onClick={onClose}
           />
 
@@ -59,7 +59,7 @@ export function Modal({ isOpen, onClose, title, children }: ModalProps) {
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.95, y: 10 }}
             transition={{ type: "spring", duration: 0.4, bounce: 0.15 }}
-            className="relative w-full max-w-lg bg-white shadow-2xl rounded-3xl overflow-hidden border border-slate-100 z-10 max-h-[90vh] flex flex-col"
+            className="relative w-full max-w-lg bg-white shadow-2xl rounded-3xl overflow-hidden border border-slate-100 z-[100001] max-h-[90vh] flex flex-col"
             onClick={(e) => e.stopPropagation()}
           >
             {/* Header */}

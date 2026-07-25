@@ -21,6 +21,7 @@ import { useState, useMemo, useCallback } from "react";
 import { Modal } from "@/components/ui/Modal";
 import { CustomSelect } from "@/components/ui/CustomSelect";
 import { TransactionForm } from "@/components/transactions/TransactionForm";
+import { getCreditCardDueDate } from "@/lib/creditCardUtils";
 import { Lock } from "lucide-react";
 import dynamic from "next/dynamic";
 import {
@@ -132,6 +133,27 @@ export function DashboardClient({
   const [activeChartTab, setActiveChartTab] = useState<'fluxo' | 'macro' | 'gastos' | 'saldo' | 'saude'>('fluxo');
   const { isUnlocked, globalBlur, toggleGlobalBlur, requestUnlock, lock } = usePrivacy();
 
+  const [detailModal, setDetailModal] = useState<{
+    title: string;
+    subtitle?: string;
+    type: 'balance' | 'incomes' | 'expenses' | 'result' | 'category' | 'account';
+    categoryName?: string;
+    accountId?: string;
+  } | null>(null);
+
+  const chartEvents = useMemo(() => ({
+    click: (params: any) => {
+      if (params.name) {
+        setDetailModal({
+          title: `Gastos em ${params.name}`,
+          subtitle: `Movimentações registradas na categoria ${params.name}`,
+          type: 'category',
+          categoryName: params.name
+        });
+      }
+    }
+  }), []);
+
   const handleToggleBlur = () => {
     if (globalBlur) {
       // Se está borrado e quer revelar, pede o PIN
@@ -145,10 +167,27 @@ export function DashboardClient({
     }
   }
 
-  const dashboardAccountOptions = useMemo(() => [
-    { id: "all", label: "Todas as Contas", icon: "💳" },
-    ...accounts.map((a) => ({ id: a.id, label: a.name, icon: a.icon }))
-  ], [accounts]);
+  const accountsMap = useMemo(() => {
+    const map: Record<string, Account> = {};
+    accounts.forEach(acc => { map[acc.id] = acc; });
+    return map;
+  }, [accounts]);
+
+  const dashboardAccountOptions = useMemo(() => {
+    const bankAccs = accounts
+      .filter(a => a.type !== 'credit_card')
+      .map(a => ({ id: a.id, label: a.name, icon: a.icon || '🏦', group: '🏦 Contas Bancárias' }));
+
+    const ccAccs = accounts
+      .filter(a => a.type === 'credit_card')
+      .map(a => ({ id: a.id, label: a.name, icon: a.icon || '💳', group: '💳 Cartões de Crédito' }));
+
+    return [
+      { id: "all", label: "Todas as Contas", icon: "📊" },
+      ...bankAccs,
+      ...ccAccs
+    ];
+  }, [accounts]);
 
   const dashboardCategoryOptions = useMemo(() => [
     { id: "all", label: "Todas as Categorias", icon: "🏷️" },
@@ -163,29 +202,76 @@ export function DashboardClient({
     });
   }, [transactions, selectedAccount, selectedCategory]);
 
-  const validCashflowTx = useMemo(() => {
-    return filteredTx.filter(t => {
-      if (t.ignore_in_cashflow) return false;
-      if (t.status !== 'posted' && t.status !== 'paid_planned') return false;
+  const isInvoicePaymentTx = useCallback((t: Transaction) => {
+    if (t.type === 'transfer') {
+      const destAcc = accountsMap[(t as any).destination_account_id];
+      if (destAcc?.type === 'credit_card') return true;
+    }
 
-      const account = accounts.find(a => a.id === t.account_id);
-      if (account?.type === 'credit_card') return false;
+    const desc = (t.description || '').toLowerCase();
+    const catName = (t.category?.name || '').toLowerCase();
 
-      return true;
-    });
-  }, [filteredTx, accounts]);
+    const keywords = [
+      'pagamento cart',
+      'pagamento de cart',
+      'pagamento fatura',
+      'pagamento de fatura',
+      'fatura cart',
+      'fatura nubank',
+      'fatura inter',
+      'fatura itau',
+      'pagamento nubank',
+      'pagamento inter'
+    ];
 
-  // Isolate current month transactions for KPIs
+    return keywords.some(k => desc.includes(k) || catName.includes(k));
+  }, [accountsMap]);
+
+  const cyclePeriod = useMemo(() => {
+    const now = new Date();
+    const currentMonth = now.getMonth();
+    const currentYear = now.getFullYear();
+    const startDate = new Date(currentYear, currentMonth, 1, 0, 0, 0);
+    const endDate = new Date(currentYear, currentMonth + 1, 0, 23, 59, 59);
+    return { startDate, endDate };
+  }, []);
+
+  const getTransactionEffectiveDate = useCallback((t: Transaction) => {
+    const acc = t.account_id ? accountsMap[t.account_id] : ((t as any).account || null);
+    if (acc && acc.type === 'credit_card' && t.type === 'expense') {
+      const closingDay = Number((acc as any).closing_day) || 1;
+      const dueDay = Number((acc as any).due_day) || 10;
+      return getCreditCardDueDate(t.date, closingDay, dueDay);
+    }
+    return new Date(t.date + 'T12:00:00');
+  }, [accountsMap]);
+
+  // Isolate current month transactions for KPIs strictly by effective date and confirmed status (status === 'posted' || status === 'paid_planned')
   const currentMonthTx = useMemo(() => {
-    const now = new Date()
-    const currentMonth = now.getMonth()
-    const currentYear = now.getFullYear()
+    return filteredTx
+      .filter(t => {
+        if (t.ignore_in_cashflow) return false;
 
-    return validCashflowTx.filter(t => {
-      const txDate = new Date(t.date + 'T12:00:00')
-      return txDate.getMonth() === currentMonth && txDate.getFullYear() === currentYear
-    })
-  }, [validCashflowTx])
+        // ONLY include confirmed / posted transactions (exclude 'planned' / unconfirmed items)
+        const isConfirmed = t.status === 'posted' || t.status === 'paid_planned';
+        if (!isConfirmed) return false;
+
+        // Check if invoice payment transfer should be ignored (only ignore if individual CC purchases are already confirmed for that card)
+        if (isInvoicePaymentTx(t)) {
+          const destCardId = (t as any).destination_account_id;
+          const hasIndividualCCExpenses = filteredTx.some(other =>
+            other.account_id === destCardId &&
+            other.type === 'expense' &&
+            (other.status === 'posted' || other.status === 'paid_planned')
+          );
+          if (hasIndividualCCExpenses) return false;
+        }
+
+        const txEffectiveDate = getTransactionEffectiveDate(t);
+        return txEffectiveDate >= cyclePeriod.startDate && txEffectiveDate <= cyclePeriod.endDate;
+      })
+      .sort((a, b) => new Date(b.date + 'T12:00:00').getTime() - new Date(a.date + 'T12:00:00').getTime());
+  }, [filteredTx, cyclePeriod, isInvoicePaymentTx, getTransactionEffectiveDate]);
 
   // KPIs (Only Current Month)
   const totalIncomes = useMemo(
@@ -193,18 +279,9 @@ export function DashboardClient({
     [currentMonthTx]
   );
 
-  // O pagamento da fatura do cartão é uma transferência de checking -> credit_card
-  // Deve contar como despesa no dashboard (Only Current Month)
   const totalExpenses = useMemo(
-    () => currentMonthTx.filter((t) => {
-      if (t.type === "expense") return true;
-      if (t.type === "transfer") {
-        const destAcc = accounts.find(a => a.id === (t as any).destination_account_id);
-        if (destAcc?.type === 'credit_card') return true;
-      }
-      return false;
-    }).reduce((acc, t) => acc + Number(t.amount), 0),
-    [currentMonthTx, accounts]
+    () => currentMonthTx.filter((t) => t.type === "expense").reduce((acc, t) => acc + Number(t.amount), 0),
+    [currentMonthTx]
   );
   const availableBalance = useMemo(
     () => {
@@ -254,18 +331,15 @@ export function DashboardClient({
 
   // Area chart data: aggregate by day
   const areaData = useMemo(() => {
-    const now = new Date();
-    const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+    const daysInMonth = new Date(cyclePeriod.startDate.getFullYear(), cyclePeriod.startDate.getMonth() + 1, 0).getDate();
     const days: Record<number, { income: number; expense: number }> = {};
     for (let d = 1; d <= daysInMonth; d++) days[d] = { income: 0, expense: 0 };
 
     currentMonthTx.forEach((t) => {
-      const day = new Date(t.date + "T12:00:00").getDate();
-      if (t.type === "income") days[day].income += Number(t.amount);
-      if (t.type === "expense") days[day].expense += Number(t.amount);
-      if (t.type === "transfer") {
-        const destAcc = accounts.find(a => a.id === (t as any).destination_account_id);
-        if (destAcc?.type === 'credit_card') days[day].expense += Number(t.amount);
+      const day = new Date(t.date + 'T12:00:00').getDate();
+      if (days[day]) {
+        if (t.type === "income") days[day].income += Number(t.amount);
+        if (t.type === "expense") days[day].expense += Number(t.amount);
       }
     });
 
@@ -274,67 +348,83 @@ export function DashboardClient({
       Receitas: v.income,
       Despesas: v.expense,
     }));
-  }, [currentMonthTx, accounts]);
+  }, [currentMonthTx, cyclePeriod]);
 
   // Donut data: top categories by expense amount (Only Current Month)
   const donutData = useMemo(() => {
-    const catMap = new Map<string, { name: string; value: number; color: string }>();
-    currentMonthTx
-      .forEach((t) => {
-        let isExpense = false;
-        let catName = t.category?.name || "Sem Categoria";
-        let catColor = t.category?.color || "#64748b";
+    const catMap = new Map<string, { name: string; icon: string; value: number }>();
+    currentMonthTx.forEach((t) => {
+      if (t.type === "expense") {
+        const resolvedCat = t.category || categories.find(c => c.id === (t as any).category_id);
+        const catName = resolvedCat?.name || "Outros Gastos";
+        const catIcon = resolvedCat?.icon || "🏷️";
 
-        if (t.type === "expense") {
-          isExpense = true;
-        } else if (t.type === "transfer") {
-          const destAcc = accounts.find(a => a.id === (t as any).destination_account_id);
-          if (destAcc?.type === 'credit_card') {
-            isExpense = true;
-            catName = "Fatura do Cartão";
-            catColor = destAcc.color || "#3b82f6";
-          }
+        const existing = catMap.get(catName);
+        if (existing) {
+          existing.value += Number(t.amount);
+        } else {
+          catMap.set(catName, { name: catName, icon: catIcon, value: Number(t.amount) });
         }
+      }
+    });
 
-        if (isExpense) {
-          const existing = catMap.get(catName);
-          if (existing) {
-            existing.value += Number(t.amount);
-          } else {
-            catMap.set(catName, { name: catName, value: Number(t.amount), color: catColor });
-          }
-        }
-      });
+    const VIBRANT_PALETTE = [
+      "#3b82f6", // Royal Blue
+      "#10b981", // Emerald Green
+      "#f59e0b", // Amber Gold
+      "#8b5cf6", // Purple / Violet
+      "#ec4899", // Vivid Pink
+      "#06b6d4", // Cyan
+      "#f97316", // Vivid Orange
+      "#6366f1", // Indigo
+      "#e11d48", // Crimson Rose
+    ];
+
     return Array.from(catMap.values())
       .sort((a, b) => b.value - a.value)
-      .slice(0, 6);
-  }, [currentMonthTx, accounts]);
+      .slice(0, 6)
+      .map((item, idx) => ({
+        ...item,
+        color: VIBRANT_PALETTE[idx % VIBRANT_PALETTE.length]
+      }));
+  }, [currentMonthTx, categories]);
 
   // Macro Bar Chart (Last 6 Months) — must come before ECharts options
   const macroBarData = useMemo(() => {
-    const now = new Date()
-    const data = []
+    const now = new Date();
+    const data = [];
     for (let i = -5; i <= 0; i++) {
-      const targetDate = new Date(now.getFullYear(), now.getMonth() + i, 1)
-      const targetMonth = targetDate.getMonth()
-      const targetYear = targetDate.getFullYear()
-      let inc = 0, exp = 0
-      validCashflowTx.forEach(t => {
-        const txDate = new Date(t.date + 'T12:00:00')
-        if (txDate.getMonth() === targetMonth && txDate.getFullYear() === targetYear) {
-          if (t.type === 'income') inc += Number(t.amount)
-          if (t.type === 'expense') exp += Number(t.amount)
-          if (t.type === 'transfer') {
-            const destAcc = accounts.find((a: any) => a.id === (t as any).destination_account_id)
-            if (destAcc?.type === 'credit_card') exp += Number(t.amount)
-          }
+      const targetMonthStart = new Date(now.getFullYear(), now.getMonth() + i, 1, 0, 0, 0);
+      const targetMonthEnd = new Date(now.getFullYear(), now.getMonth() + i + 1, 0, 23, 59, 59);
+
+      let inc = 0, exp = 0;
+      filteredTx.forEach((t: Transaction) => {
+        if (t.ignore_in_cashflow) return;
+
+        const isConfirmed = t.status === 'posted' || t.status === 'paid_planned';
+        if (!isConfirmed) return;
+
+        if (isInvoicePaymentTx(t)) {
+          const destCardId = (t as any).destination_account_id;
+          const hasIndividualCCExpenses = filteredTx.some(other =>
+            other.account_id === destCardId &&
+            other.type === 'expense' &&
+            (other.status === 'posted' || other.status === 'paid_planned')
+          );
+          if (hasIndividualCCExpenses) return;
         }
-      })
-      const monthLabel = new Intl.DateTimeFormat('pt-BR', { month: 'short' }).format(targetDate)
-      data.push({ name: monthLabel.charAt(0).toUpperCase() + monthLabel.slice(1), Receitas: inc, Despesas: exp })
+
+        const txEffectiveDate = getTransactionEffectiveDate(t);
+        if (txEffectiveDate >= targetMonthStart && txEffectiveDate <= targetMonthEnd) {
+          if (t.type === 'income') inc += Number(t.amount);
+          if (t.type === 'expense') exp += Number(t.amount);
+        }
+      });
+      const monthLabel = new Intl.DateTimeFormat('pt-BR', { month: 'short' }).format(targetMonthStart);
+      data.push({ name: monthLabel.charAt(0).toUpperCase() + monthLabel.slice(1), Receitas: inc, Despesas: exp });
     }
-    return data
-  }, [validCashflowTx, accounts])
+    return data;
+  }, [filteredTx, isInvoicePaymentTx, getTransactionEffectiveDate]);
 
   // ECharts options — Area Chart (Fluxo Diário)
   const areaChartOption = useMemo(() => ({
@@ -379,13 +469,12 @@ export function DashboardClient({
 
   // ECharts options — Macro Bar Chart (6 meses)
   const macroBarOption = useMemo(() => ({
-    // AJUSTE AQUI: Aumentamos o recuo do topo e da base, e ativamos o containLabel
     grid: {
       top: 32,
       right: 16,
-      bottom: 36, // Mais espaço para a legenda respirar embaixo do eixo X
-      left: 16,   // Reduzido de 54 para 16 porque o containLabel cuidará do espaçamento do texto do eixo Y
-      containLabel: true // O pulo do gato para evitar sobreposição automaticamente
+      bottom: 36,
+      left: 16,
+      containLabel: true
     },
     tooltip: {
       trigger: 'axis',
@@ -426,6 +515,7 @@ export function DashboardClient({
   const donutExpenseOption = useMemo(() => ({
     tooltip: {
       trigger: 'item',
+      extraCssText: 'z-index: 10 !important;',
       backgroundColor: 'rgba(255,255,255,0.97)',
       borderColor: '#e2e8f0',
       borderWidth: 1,
@@ -434,7 +524,8 @@ export function DashboardClient({
       textStyle: { color: '#334155', fontSize: 12, fontFamily: 'inherit' },
       formatter: (p: any) => {
         const fmt = (v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
-        return `<div style="display:flex;align-items:center;gap:8px;margin-bottom:4px"><span style="width:10px;height:10px;border-radius:50%;background:${p.color};display:inline-block"></span><span style="font-weight:700;color:#334155">${p.name}</span></div>` +
+        const icon = p.data.icon ? `${p.data.icon} ` : '';
+        return `<div style="display:flex;align-items:center;gap:8px;margin-bottom:4px"><span style="width:10px;height:10px;border-radius:50%;background:${p.color};display:inline-block"></span><span style="font-weight:700;color:#334155">${icon}${p.name}</span></div>` +
           `<div style="font-size:15px;font-weight:900;color:#0f172a">${fmt(p.value)}</div>` +
           `<div style="font-size:10px;color:#94a3b8;margin-top:2px">${p.percent.toFixed(1)}% do total</div>`
       }
@@ -445,7 +536,7 @@ export function DashboardClient({
       padAngle: 4, itemStyle: { borderRadius: 6 },
       label: { show: false },
       emphasis: { scale: true, scaleSize: 8, itemStyle: { shadowBlur: 16, shadowOffsetY: 6, shadowColor: 'rgba(0,0,0,0.15)' } },
-      data: donutData.map((d, i) => ({ name: d.name, value: d.value, itemStyle: { color: d.color || DONUT_COLORS[i % DONUT_COLORS.length] } })),
+      data: donutData.map((d) => ({ name: d.name, icon: d.icon, value: d.value, itemStyle: { color: d.color } })),
       animationType: 'expansion', animationDuration: 1000, animationEasing: 'cubicOut'
     }]
   }), [donutData])
@@ -532,502 +623,455 @@ export function DashboardClient({
     animate: { opacity: 1, y: 0 },
   };
 
+  const netMonthlyResult = totalIncomes - totalExpenses;
+  const savingsRate = totalIncomes > 0 ? Math.max(0, Math.round((netMonthlyResult / totalIncomes) * 100)) : 0;
+
+  const liquidAccounts = useMemo(() => {
+    return accounts.filter(a => a.type !== 'credit_card');
+  }, [accounts]);
+
   return (
     <>
-      <main className="flex-1 p-4 md:p-6 lg:p-8 max-w-7xl mx-auto w-full">
-        {/* Header */}
-        <motion.div {...fadeUp} transition={{ duration: 0.3 }} className="flex flex-wrap justify-between items-start lg:items-end mb-8 gap-4 md:gap-6">
-          <div className="w-full 2xl:w-auto">
-            <h1 className="text-2xl font-black text-slate-900">
+      <main className="flex-1 p-4 md:p-6 lg:p-8 max-w-7xl mx-auto w-full space-y-6">
+        {/* Top Header */}
+        <motion.div {...fadeUp} transition={{ duration: 0.3 }} className="flex flex-wrap justify-between items-center gap-4">
+          <div>
+            <h1 className="text-xl sm:text-2xl font-black text-slate-900">
               Olá, {user?.user_metadata?.first_name || "Usuário"}! 👋
             </h1>
-            <p className="text-sm text-slate-500 mt-1 flex items-center gap-1.5">
-              <CalendarDays className="w-4 h-4" />
-              Fluxo de caixa de{" "}
-              <span className="font-semibold text-slate-700">
+            <p className="text-xs sm:text-sm text-slate-500 mt-0.5 flex items-center gap-1.5 font-medium">
+              <CalendarDays className="w-3.5 h-3.5 text-emerald-600" />
+              Resumo Financeiro ·{" "}
+              <span className="font-bold text-slate-700">
                 {MONTHS[new Date().getMonth()]} {new Date().getFullYear()}
               </span>
             </p>
           </div>
-          <div className="flex flex-wrap items-center 2xl:justify-end gap-3 w-full 2xl:flex-1">
-            {/* Mobile Filters Toggle Button */}
-            <div className="flex justify-between md:hidden w-full gap-2">
-              <button
-                onClick={() => setShowFilters(!showFilters)}
-                className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 bg-white border border-slate-200 rounded-xl text-sm font-medium text-slate-700 hover:bg-slate-50 transition-colors"
-              >
-                <Settings2 className="w-4 h-4" />
-                Filtros {selectedAccount !== 'all' || selectedCategory !== 'all' ? '(Ativos)' : ''}
-              </button>
 
-              <button
-                onClick={handleToggleBlur}
-                className="px-4 py-2.5 bg-white border border-slate-200 rounded-xl text-slate-600 hover:bg-slate-50 flex items-center justify-center shadow-sm"
-                title={globalBlur ? "Mostrar saldos" : "Ocultar saldos"}
-              >
-                {globalBlur ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
-              </button>
-            </div>
-
-            <div className={`${showFilters ? 'flex' : 'hidden'} md:flex flex-col md:flex-row flex-wrap items-center gap-2.5 w-full md:w-auto bg-slate-100/60 p-1 rounded-2xl border border-slate-200/80 shadow-2xs`}>
-              {/* Seletor de Conta Ultramoderno */}
+          <div className="flex flex-wrap items-center gap-2.5 w-full sm:w-auto relative z-30">
+            {/* Quick Filters */}
+            <div className="flex flex-wrap sm:flex-nowrap items-center gap-1.5 sm:gap-2 bg-slate-100/80 p-1.5 rounded-2xl border border-slate-200/80 shadow-2xs w-full sm:w-auto overflow-visible relative z-30">
               <CustomSelect
                 value={selectedAccount}
                 onChange={setSelectedAccount}
                 options={dashboardAccountOptions}
                 placeholder="Todas as Contas"
-                className="w-full md:w-auto min-w-[170px]"
+                className="flex-1 sm:flex-initial sm:w-40 text-xs min-w-[130px]"
               />
 
-              {/* Seletor de Categoria Ultramoderno */}
               <CustomSelect
                 value={selectedCategory}
                 onChange={setSelectedCategory}
                 options={dashboardCategoryOptions}
                 placeholder="Todas as Categorias"
-                className="w-full md:w-auto min-w-[185px]"
+                className="flex-1 sm:flex-initial sm:w-44 text-xs min-w-[130px]"
               />
 
-              {/* Checkbox Cofrinhos Ultramoderno */}
-              <label className="flex items-center gap-2 px-3.5 py-2 bg-white border border-slate-200 rounded-xl text-xs sm:text-sm font-semibold text-slate-700 cursor-pointer hover:bg-slate-50 transition-all shadow-xs select-none w-full md:w-auto">
-                <input
-                  type="checkbox"
-                  checked={includeVaults}
-                  onChange={(e) => setIncludeVaults(e.target.checked)}
-                  className="w-4 h-4 rounded text-emerald-600 focus:ring-emerald-500 border-slate-300 cursor-pointer"
-                />
-                <PiggyBank className="w-4 h-4 text-emerald-600" />
-                <span>Incluir Cofrinhos</span>
-              </label>
+              <div className="flex items-center gap-1.5 shrink-0">
+                <label className="flex items-center gap-1.5 px-2.5 py-2 bg-white border border-slate-200 rounded-xl text-xs font-bold text-slate-700 cursor-pointer hover:bg-slate-50 transition-all shadow-2xs select-none">
+                  <input
+                    type="checkbox"
+                    checked={includeVaults}
+                    onChange={(e) => setIncludeVaults(e.target.checked)}
+                    className="w-3.5 h-3.5 rounded text-emerald-600 focus:ring-emerald-500 border-slate-300 cursor-pointer"
+                  />
+                  <PiggyBank className="w-3.5 h-3.5 text-emerald-600" />
+                  <span className="hidden sm:inline">Cofrinhos</span>
+                </label>
 
-              {/* Reset button se houver filtro ativo */}
-              {(selectedAccount !== 'all' || selectedCategory !== 'all') && (
                 <button
-                  onClick={() => { setSelectedAccount('all'); setSelectedCategory('all'); }}
-                  className="px-3 py-2 text-xs font-bold text-rose-600 hover:text-rose-700 bg-rose-50 hover:bg-rose-100 rounded-xl transition-all w-full md:w-auto text-center"
+                  onClick={handleToggleBlur}
+                  className="p-2 bg-white border border-slate-200 rounded-xl text-slate-600 hover:bg-slate-50 flex items-center justify-center shadow-2xs shrink-0 transition-colors"
+                  title={globalBlur ? "Mostrar saldos" : "Ocultar saldos"}
                 >
-                  Limpar
+                  {globalBlur ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                 </button>
-              )}
+
+                {isUnlocked && (
+                  <button
+                    onClick={lock}
+                    className="p-2 bg-rose-50 border border-rose-200 rounded-xl text-rose-600 hover:bg-rose-100 flex items-center justify-center shadow-2xs shrink-0 transition-colors"
+                    title="Bloquear Sessão"
+                  >
+                    <Lock className="w-4 h-4" />
+                  </button>
+                )}
+              </div>
             </div>
 
-            <div className="flex gap-2 w-full md:w-auto mt-2 md:mt-0">
-              <button
-                onClick={handleToggleBlur}
-                className="hidden md:flex px-4 py-2 bg-white border border-slate-200 rounded-xl text-slate-600 hover:bg-slate-50 items-center justify-center transition-colors shadow-sm hover:shadow-md"
-                title={globalBlur ? "Mostrar saldos" : "Ocultar saldos"}
-              >
-                {globalBlur ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
-              </button>
-              {isUnlocked && (
-                <button
-                  onClick={lock}
-                  className="hidden md:flex px-4 py-2 bg-rose-50 border border-rose-200 rounded-xl text-rose-600 hover:bg-rose-100 items-center justify-center transition-colors shadow-sm hover:shadow-md"
-                  title="Bloquear Sessão"
-                >
-                  <Lock className="w-5 h-5" />
-                </button>
-              )}
-
-              <motion.button
-                whileHover={{ scale: 1.02, y: -1 }}
-                whileTap={{ scale: 0.98 }}
-                onClick={() => setIsTxModalOpen(true)}
-                className="btn-primary flex items-center justify-center gap-2 shadow-[0_8px_20px_rgb(16,185,129,0.3)] flex-1 md:flex-none text-sm px-6 py-2.5"
-              >
-                <Plus className="w-5 h-5" />
-                Nova Transação
-              </motion.button>
-            </div>
+            <motion.button
+              whileHover={{ scale: 1.02, y: -1 }}
+              whileTap={{ scale: 0.98 }}
+              onClick={() => setIsTxModalOpen(true)}
+              className="bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs sm:text-sm px-4 py-2.5 rounded-xl flex items-center justify-center gap-2 transition-all shadow-md active:scale-95 w-full sm:w-auto"
+            >
+              <Plus className="w-4 h-4 text-emerald-400" />
+              Nova Transação
+            </motion.button>
           </div>
         </motion.div>
 
-        {/* KPI Cards */}
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 md:gap-6 mb-8">
+        {/* 4 Hero KPI Cards */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5">
+          {/* 1. Saldo Consolidado */}
           <motion.div
             {...fadeUp}
             transition={{ duration: 0.3, delay: 0.05 }}
-            className="glass-panel p-5 md:p-6 rounded-2xl group hover:shadow-lg hover:shadow-emerald-500/5 transition-all duration-300"
+            onClick={() => setDetailModal({
+              title: 'Resumo do Saldo Consolidado',
+              subtitle: 'Detalhamento de contas e cofrinhos vinculados',
+              type: 'balance'
+            })}
+            className="glass-panel p-4 sm:p-5 rounded-2xl border border-slate-200/80 hover:shadow-md hover:border-emerald-300 transition-all relative overflow-hidden group cursor-pointer"
           >
-            <div className="flex justify-between items-center">
-              <h3 className="text-sm font-semibold text-slate-500">Saldo Consolidado</h3>
-              <div className="w-9 h-9 rounded-xl bg-emerald-50 flex items-center justify-center group-hover:bg-emerald-100 transition-colors">
-                <Wallet className="w-4 h-4 text-emerald-600" />
+            <div className="flex justify-between items-center mb-2">
+              <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">Saldo Consolidado</span>
+              <div className="w-8 h-8 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center group-hover:bg-emerald-100 transition-colors">
+                <Wallet className="w-4 h-4" />
               </div>
             </div>
             <div
-              className={`text-2xl xl:text-3xl font-black text-slate-900 tabular-nums truncate ${globalBlur ? 'blur-sm select-none cursor-pointer' : ''}`}
-              onClick={globalBlur ? () => requestUnlock() : undefined}
+              className={`text-xl sm:text-2xl font-black text-slate-900 tabular-nums truncate ${globalBlur && !isUnlocked ? 'blur-sm select-none' : ''}`}
             >
               {globalBlur && !isUnlocked ? '••••' : currencyFmt.format(displayBalance)}
             </div>
-            {/* PRINT DOS SALDOS */}
-            {/* <div className="text-xs text-slate-400 mt-1 flex items-center justify-between">
-              <span>
-                {includeVaults
-                  ? `${currencyFmt.format(availableBalance)} disponível`
-                  : `${currencyFmt.format(totalBalance)} com cofrinhos`}
-              </span>
-              {totalInVaults > 0 && (
-                <span className="text-emerald-600 font-medium bg-emerald-50 px-1.5 py-0.5 rounded">
-                  {currencyFmt.format(totalInVaults)} guardado
+            <div className="text-[11px] text-slate-400 font-semibold mt-1 flex items-center justify-between">
+              {includeVaults ? (
+                <span>
+                  Inclui <strong className="text-emerald-600 font-bold">{globalBlur && !isUnlocked ? '••••' : currencyFmt.format(totalInVaults)}</strong> de cofrinhos
                 </span>
+              ) : (
+                <span>Saldo disponível nas contas</span>
               )}
-            </div> */}
+              <span className="text-emerald-600 font-bold group-hover:translate-x-0.5 transition-transform">Ver detalhes →</span>
+            </div>
           </motion.div>
 
+          {/* 2. Entradas do Mês */}
           <motion.div
             {...fadeUp}
             transition={{ duration: 0.3, delay: 0.1 }}
-            className="glass-panel p-5 md:p-6 rounded-2xl group hover:shadow-lg hover:shadow-emerald-500/5 transition-all duration-300 relative overflow-hidden"
+            onClick={() => setDetailModal({
+              title: 'Entradas do Mês',
+              subtitle: `Lançamentos de receita em ${MONTHS[new Date().getMonth()]}`,
+              type: 'incomes'
+            })}
+            className="glass-panel p-4 sm:p-5 rounded-2xl border border-emerald-100/80 hover:shadow-md hover:border-emerald-300 transition-all group cursor-pointer"
           >
-            <div className="absolute inset-0 opacity-[0.03] group-hover:opacity-[0.06] transition-opacity pointer-events-none">
-              <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={areaData}>
-                  <Line type="monotone" dataKey="Receitas" stroke="#10b981" strokeWidth={3} dot={false} isAnimationActive={false} />
-                </LineChart>
-              </ResponsiveContainer>
+            <div className="flex justify-between items-center mb-2">
+              <span className="text-xs font-bold text-emerald-700 uppercase tracking-wider">Entradas do Mês</span>
+              <div className="w-8 h-8 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center group-hover:bg-emerald-100 transition-colors">
+                <ArrowUpRight className="w-4 h-4" />
+              </div>
             </div>
-            <div className="relative z-10">
-              <div className="flex justify-between items-center mb-3">
-                <h3 className="text-sm font-semibold text-slate-500">Receitas</h3>
-                <div className="w-9 h-9 rounded-xl bg-emerald-50 flex items-center justify-center group-hover:bg-emerald-100 transition-colors">
-                  <ArrowUpRight className="w-4 h-4 text-emerald-600" />
-                </div>
-              </div>
-              <div className="text-2xl xl:text-3xl font-black text-emerald-600 tabular-nums truncate">
-                {currencyFmt.format(totalIncomes)}
-              </div>
-              <p className="text-xs text-slate-400 mt-1">{MONTHS[new Date().getMonth()]}</p>
+            <div
+              className={`text-xl sm:text-2xl font-black text-emerald-600 tabular-nums truncate ${globalBlur && !isUnlocked ? 'blur-sm select-none' : ''}`}
+            >
+              {globalBlur && !isUnlocked ? '••••' : currencyFmt.format(totalIncomes)}
+            </div>
+            <div className="text-[11px] text-emerald-700/80 font-medium mt-1 flex items-center justify-between">
+              <span>{MONTHS[new Date().getMonth()]} {new Date().getFullYear()}</span>
+              <span className="text-emerald-600 font-bold group-hover:translate-x-0.5 transition-transform">Ver lista →</span>
             </div>
           </motion.div>
 
+          {/* 3. Saídas do Mês */}
           <motion.div
             {...fadeUp}
             transition={{ duration: 0.3, delay: 0.15 }}
-            className="glass-panel p-5 md:p-6 rounded-2xl group hover:shadow-lg hover:shadow-rose-500/5 transition-all duration-300 relative overflow-hidden"
+            onClick={() => setDetailModal({
+              title: 'Saídas do Mês',
+              subtitle: `Lançamentos de despesa em ${MONTHS[new Date().getMonth()]}`,
+              type: 'expenses'
+            })}
+            className="glass-panel p-4 sm:p-5 rounded-2xl border border-rose-100/80 hover:shadow-md hover:border-rose-300 transition-all group cursor-pointer"
           >
-            <div className="absolute inset-0 opacity-[0.03] group-hover:opacity-[0.06] transition-opacity pointer-events-none">
-              <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={areaData}>
-                  <Line type="monotone" dataKey="Despesas" stroke="#f43f5e" strokeWidth={3} dot={false} isAnimationActive={false} />
-                </LineChart>
-              </ResponsiveContainer>
+            <div className="flex justify-between items-center mb-2">
+              <span className="text-xs font-bold text-rose-700 uppercase tracking-wider">Saídas do Mês</span>
+              <div className="w-8 h-8 rounded-xl bg-rose-50 text-rose-600 flex items-center justify-center group-hover:bg-rose-100 transition-colors">
+                <ArrowDownRight className="w-4 h-4" />
+              </div>
             </div>
-            <div className="relative z-10">
-              <div className="flex justify-between items-center mb-3">
-                <h3 className="text-sm font-semibold text-slate-500">Despesas</h3>
-                <div className="w-9 h-9 rounded-xl bg-rose-50 flex items-center justify-center group-hover:bg-rose-100 transition-colors">
-                  <ArrowDownRight className="w-4 h-4 text-rose-600" />
-                </div>
+            <div
+              className={`text-xl sm:text-2xl font-black text-rose-600 tabular-nums truncate ${globalBlur && !isUnlocked ? 'blur-sm select-none' : ''}`}
+            >
+              {globalBlur && !isUnlocked ? '••••' : currencyFmt.format(totalExpenses)}
+            </div>
+            <div className="text-[11px] text-rose-700/80 font-medium mt-1 flex items-center justify-between">
+              <span>{totalIncomes > 0 ? `${Math.round((totalExpenses / totalIncomes) * 100)}% das receitas` : 'Sem receitas no mês'}</span>
+              <span className="text-rose-600 font-bold group-hover:translate-x-0.5 transition-transform">Ver lista →</span>
+            </div>
+          </motion.div>
+
+          {/* 4. Economia / Resultado */}
+          <motion.div
+            {...fadeUp}
+            transition={{ duration: 0.3, delay: 0.2 }}
+            onClick={() => setDetailModal({
+              title: 'Balanço do Mês',
+              subtitle: `Comparativo entre Entradas e Saídas em ${MONTHS[new Date().getMonth()]}`,
+              type: 'result'
+            })}
+            className={`glass-panel p-4 sm:p-5 rounded-2xl border ${netMonthlyResult >= 0 ? 'border-emerald-100/80 bg-emerald-50/20 hover:border-emerald-300' : 'border-rose-100/80 bg-rose-50/20 hover:border-rose-300'} hover:shadow-md transition-all group cursor-pointer`}
+          >
+            <div className="flex justify-between items-center mb-2">
+              <span className="text-xs font-bold text-slate-700 uppercase tracking-wider">Resultado do Mês</span>
+              <div className={`w-8 h-8 rounded-xl flex items-center justify-center font-bold text-xs ${netMonthlyResult >= 0 ? 'bg-emerald-100 text-emerald-700' : 'bg-rose-100 text-rose-700'}`}>
+                {netMonthlyResult >= 0 ? '📈' : '📉'}
               </div>
-              <div className="text-2xl xl:text-3xl font-black text-rose-600 tabular-nums truncate">
-                {currencyFmt.format(totalExpenses)}
-              </div>
-              <p className="text-xs text-slate-400 mt-1">{MONTHS[new Date().getMonth()]}</p>
+            </div>
+            <div
+              className={`text-xl sm:text-2xl font-black tabular-nums truncate ${netMonthlyResult >= 0 ? 'text-emerald-700' : 'text-rose-600'} ${globalBlur && !isUnlocked ? 'blur-sm select-none' : ''}`}
+            >
+              {globalBlur && !isUnlocked ? '••••' : `${netMonthlyResult >= 0 ? '+' : ''}${currencyFmt.format(netMonthlyResult)}`}
+            </div>
+            <div className="text-[11px] font-semibold mt-1 text-slate-500 flex items-center justify-between">
+              <span>{netMonthlyResult >= 0 ? `Taxa de poupança: ${savingsRate}%` : 'Superávit negativo este mês'}</span>
+              <span className="text-slate-700 font-bold group-hover:translate-x-0.5 transition-transform">Ver resumo →</span>
             </div>
           </motion.div>
         </div>
 
-        {/* Mobile Chart Tabs Selector */}
-        {hasData && (
-          <div className="md:hidden mb-6">
-            <div className="bg-slate-200/70 p-1 rounded-2xl flex overflow-x-auto no-scrollbar gap-1 text-xs font-semibold mb-4">
-              <button
-                onClick={() => setActiveChartTab('fluxo')}
-                className={`flex-1 min-w-[75px] py-2 px-2 rounded-xl text-center transition-all ${
-                  activeChartTab === 'fluxo' ? 'bg-white text-emerald-700 shadow-xs font-bold' : 'text-slate-600'
-                }`}
-              >
-                Fluxo
-              </button>
-              <button
-                onClick={() => setActiveChartTab('macro')}
-                className={`flex-1 min-w-[75px] py-2 px-2 rounded-xl text-center transition-all ${
-                  activeChartTab === 'macro' ? 'bg-white text-emerald-700 shadow-xs font-bold' : 'text-slate-600'
-                }`}
-              >
-                6 Meses
-              </button>
-              <button
-                onClick={() => setActiveChartTab('gastos')}
-                className={`flex-1 min-w-[75px] py-2 px-2 rounded-xl text-center transition-all ${
-                  activeChartTab === 'gastos' ? 'bg-white text-emerald-700 shadow-xs font-bold' : 'text-slate-600'
-                }`}
-              >
-                Gastos
-              </button>
-              <button
-                onClick={() => setActiveChartTab('saldo')}
-                className={`flex-1 min-w-[75px] py-2 px-2 rounded-xl text-center transition-all ${
-                  activeChartTab === 'saldo' ? 'bg-white text-emerald-700 shadow-xs font-bold' : 'text-slate-600'
-                }`}
-              >
-                Saldos
-              </button>
-              <button
-                onClick={() => setActiveChartTab('saude')}
-                className={`flex-1 min-w-[75px] py-2 px-2 rounded-xl text-center transition-all ${
-                  activeChartTab === 'saude' ? 'bg-white text-emerald-700 shadow-xs font-bold' : 'text-slate-600'
-                }`}
-              >
-                Saúde
-              </button>
+        {/* Visão Geral Financeira - Main 2 Column Grid */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          {/* Main Chart Card (2 Columns) */}
+          <motion.div
+            {...fadeUp}
+            transition={{ duration: 0.35, delay: 0.25 }}
+            className="lg:col-span-2 glass-panel rounded-2xl p-5 md:p-6 border border-slate-200/80 shadow-xs flex flex-col justify-between"
+          >
+            <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
+              <div>
+                <h3 className="font-bold text-slate-800 text-sm sm:text-base">Evolução do Fluxo Financeiro</h3>
+                <p className="text-xs text-slate-500 font-medium">Acompanhe entradas e saídas ao longo do tempo</p>
+              </div>
+
+              {/* Segmented Chart Selector */}
+              <div className="flex bg-slate-100 p-1 rounded-xl text-xs font-bold border border-slate-200/60">
+                <button
+                  type="button"
+                  onClick={() => setActiveChartTab('fluxo')}
+                  className={`px-3 py-1.5 rounded-lg transition-all ${
+                    activeChartTab === 'fluxo' ? 'bg-white text-emerald-700 shadow-xs' : 'text-slate-500 hover:text-slate-800'
+                  }`}
+                >
+                  Fluxo Diário
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setActiveChartTab('macro')}
+                  className={`px-3 py-1.5 rounded-lg transition-all ${
+                    activeChartTab === 'macro' ? 'bg-white text-emerald-700 shadow-xs' : 'text-slate-500 hover:text-slate-800'
+                  }`}
+                >
+                  6 Meses
+                </button>
+              </div>
             </div>
 
-            {/* Mobile Active Chart Display */}
-            {activeChartTab === 'fluxo' && (
-              <motion.div {...fadeUp} className="glass-panel rounded-2xl p-5">
-                <div className="flex items-center justify-between mb-4">
-                  <h3 className="font-bold text-slate-800 text-sm">Fluxo Diário</h3>
-                  <div className="flex items-center gap-2 text-[11px]">
-                    <span className="flex items-center gap-1 text-emerald-600 font-semibold"><span className="w-2 h-2 rounded-full bg-emerald-500 inline-block" />Receitas</span>
-                    <span className="flex items-center gap-1 text-rose-500 font-semibold"><span className="w-2 h-2 rounded-full bg-rose-500 inline-block" />Despesas</span>
-                  </div>
-                </div>
-                <div className="h-60">
-                  <ReactECharts notMerge={true} lazyUpdate={true} option={areaChartOption} style={{ height: '100%', width: '100%' }} />
-                </div>
-              </motion.div>
-            )}
-
-            {activeChartTab === 'macro' && (
-              <motion.div {...fadeUp} className="glass-panel rounded-2xl p-5">
-                <h3 className="font-bold text-slate-800 text-sm mb-4">Visão Geral (Últimos 6 Meses)</h3>
-                <div className="h-60">
-                  <ReactECharts notMerge={true} lazyUpdate={true} option={macroBarOption} style={{ height: '100%', width: '100%' }} />
-                </div>
-              </motion.div>
-            )}
-
-            {activeChartTab === 'gastos' && (
-              <motion.div {...fadeUp} className="glass-panel rounded-2xl p-5">
-                <h3 className="font-bold text-slate-800 text-sm mb-4">Top Despesas (Mês Atual)</h3>
-                {donutData.length > 0 ? (
-                  <div className="h-60">
-                    <ReactECharts notMerge={true} lazyUpdate={true} option={donutExpenseOption} style={{ height: '100%', width: '100%' }} />
-                  </div>
-                ) : (
-                  <div className="h-60 flex flex-col items-center justify-center gap-2 text-slate-400">
-                    <BarChart3 className="w-10 h-10 text-slate-200" />
-                    <p className="text-sm">Nenhuma despesa no mês atual</p>
-                  </div>
-                )}
-              </motion.div>
-            )}
-
-            {activeChartTab === 'saldo' && (
-              <motion.div {...fadeUp} className="glass-panel rounded-2xl p-5">
-                <h3 className="font-bold text-slate-800 text-sm mb-4">Distribuição do Saldo</h3>
-                {accountDistributionData.length > 0 ? (
-                  <div className="h-60">
-                    <ReactECharts notMerge={true} lazyUpdate={true} option={donutDistOption} style={{ height: '100%', width: '100%' }} />
-                  </div>
-                ) : (
-                  <div className="h-60 flex flex-col items-center justify-center gap-2 text-slate-400">
-                    <Wallet className="w-10 h-10 text-slate-200" />
-                    <p className="text-sm">Nenhuma conta com saldo positivo</p>
-                  </div>
-                )}
-              </motion.div>
-            )}
-
-            {activeChartTab === 'saude' && (
-              <motion.div {...fadeUp} className="glass-panel rounded-2xl p-5 flex flex-col">
-                <h3 className="font-bold text-slate-800 text-sm mb-1">Saúde Financeira</h3>
-                <p className="text-xs text-slate-400 mb-2">% despesas vs receitas</p>
-                <div className="h-52">
-                  <ReactECharts notMerge={true} lazyUpdate={true} option={gaugeOption} style={{ height: '100%', width: '100%' }} />
-                </div>
-                <p className={`text-center text-xs font-bold mt-2 ${spendingRate < 70 ? 'text-emerald-600' : spendingRate < 90 ? 'text-amber-500' : 'text-rose-600'}`}>
-                  {spendingRate < 70 ? '✅ Dentro do orçamento' : spendingRate < 90 ? '⚠️ Atenção aos gastos' : '🚨 Gastos elevados'}
-                </p>
-              </motion.div>
-            )}
-          </div>
-        )}
-
-        {/* Desktop Charts Layout */}
-        {hasData && (
-          <div className="hidden md:block space-y-8 mb-8">
-            <div className="grid grid-cols-1 lg:grid-cols-6 gap-4 md:gap-6">
-              {/* Area Chart */}
-              <motion.div
-                {...fadeUp}
-                transition={{ duration: 0.4, delay: 0.2 }}
-                className="lg:col-span-4 glass-panel rounded-2xl p-5 md:p-6"
-              >
-                <div className="flex items-center justify-between mb-4">
-                  <h3 className="font-bold text-slate-800">Fluxo Diário <span className="text-slate-400 font-medium text-sm">({MONTHS[new Date().getMonth()]})</span></h3>
-                  <div className="flex items-center gap-3 text-xs">
-                    <span className="flex items-center gap-1.5 text-emerald-600 font-semibold"><span className="w-2 h-2 rounded-full bg-emerald-500 inline-block" />Receitas</span>
-                    <span className="flex items-center gap-1.5 text-rose-500 font-semibold"><span className="w-2 h-2 rounded-full bg-rose-500 inline-block" />Despesas</span>
-                  </div>
-                </div>
-                <div className="h-64 md:h-72">
-                  <ReactECharts notMerge={true} lazyUpdate={true} option={areaChartOption} style={{ height: '100%', width: '100%' }} />
-                </div>
-              </motion.div>
-
-              {/* Gauge */}
-              <motion.div
-                {...fadeUp}
-                transition={{ duration: 0.4, delay: 0.25 }}
-                className="lg:col-span-2 glass-panel rounded-2xl p-5 md:p-6 flex flex-col"
-              >
-                <h3 className="font-bold text-slate-800 mb-1">Saúde Financeira</h3>
-                <p className="text-xs text-slate-400 mb-2">% despesas vs receitas</p>
-                <div className="flex-1 min-h-0 h-48 md:h-full">
-                  <ReactECharts notMerge={true} lazyUpdate={true} option={gaugeOption} style={{ height: '100%', width: '100%' }} />
-                </div>
-                <p className={`text-center text-xs font-bold mt-1 ${spendingRate < 70 ? 'text-emerald-600' : spendingRate < 90 ? 'text-amber-500' : 'text-rose-600'}`}>
-                  {spendingRate < 70 ? '✅ Dentro do orçamento' : spendingRate < 90 ? '⚠️ Atenção aos gastos' : '🚨 Gastos elevados'}
-                </p>
-              </motion.div>
+            <div className="h-64 sm:h-72 w-full">
+              {activeChartTab === 'fluxo' ? (
+                <ReactECharts notMerge={true} lazyUpdate={true} option={areaChartOption} style={{ height: '100%', width: '100%' }} />
+              ) : (
+                <ReactECharts notMerge={true} lazyUpdate={true} option={macroBarOption} style={{ height: '100%', width: '100%' }} />
+              )}
             </div>
+          </motion.div>
 
-            {/* Macro Bar Chart */}
+          {/* Category Spending Breakdown (1 Column) */}
+          <motion.div
+            {...fadeUp}
+            transition={{ duration: 0.35, delay: 0.3 }}
+            className="glass-panel rounded-2xl p-5 md:p-6 border border-slate-200/80 shadow-xs flex flex-col justify-between"
+          >
             <div>
-              <motion.div
-                {...fadeUp}
-                transition={{ duration: 0.4, delay: 0.28 }}
-                className="glass-panel rounded-2xl p-5 md:p-6"
-              >
-                <h3 className="font-bold text-slate-800 mb-4">Visão Geral <span className="text-slate-400 font-medium text-sm">(Últimos 6 Meses)</span></h3>
-                <div className="h-64 md:h-72">
-                  <ReactECharts notMerge={true} lazyUpdate={true} option={macroBarOption} style={{ height: '100%', width: '100%' }} />
+              <h3 className="font-bold text-slate-800 text-sm sm:text-base mb-0.5">Top Gastos por Categoria</h3>
+              <p className="text-xs text-slate-500 font-medium mb-4">Clique no gráfico ou item para ver detalhes</p>
+            </div>
+
+            {donutData.length > 0 ? (
+              <div className="flex flex-col gap-4">
+                <div className="h-44 w-full cursor-pointer">
+                  <ReactECharts notMerge={true} lazyUpdate={true} option={donutExpenseOption} onEvents={chartEvents} style={{ height: '100%', width: '100%' }} />
                 </div>
-              </motion.div>
-            </div>
 
-            {/* Charts Row 2: Donuts */}
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 md:gap-6">
-              {/* Donut Despesas */}
-              <motion.div
-                {...fadeUp}
-                transition={{ duration: 0.4, delay: 0.3 }}
-                className="glass-panel rounded-2xl p-5 md:p-6"
-              >
-                <h3 className="font-bold text-slate-800 mb-4">Top Despesas <span className="text-slate-400 font-medium text-sm">(Mês Atual)</span></h3>
-                {donutData.length > 0 ? (
-                  <div className="h-64 md:h-72">
-                    <ReactECharts notMerge={true} lazyUpdate={true} option={donutExpenseOption} style={{ height: '100%', width: '100%' }} />
-                  </div>
-                ) : (
-                  <div className="h-64 flex flex-col items-center justify-center gap-2 text-slate-400">
-                    <BarChart3 className="w-10 h-10 text-slate-200" />
-                    <p className="text-sm">Nenhuma despesa no mês atual</p>
-                  </div>
-                )}
-              </motion.div>
+                <div className="flex flex-col gap-2 pt-2 border-t border-slate-100">
+                  {donutData.slice(0, 4).map((d, i) => {
+                    const pct = totalExpenses > 0 ? Math.round((d.value / totalExpenses) * 100) : 0;
+                    return (
+                      <div
+                        key={d.name}
+                        onClick={() => setDetailModal({
+                          title: `Gastos em ${d.name}`,
+                          subtitle: `Lançamentos na categoria ${d.name}`,
+                          type: 'category',
+                          categoryName: d.name
+                        })}
+                        className="flex items-center justify-between text-xs p-1.5 rounded-xl hover:bg-slate-100/70 transition-colors cursor-pointer group"
+                      >
+                        <div className="flex items-center gap-2 min-w-0 flex-1 pr-2">
+                          <span className="text-sm shrink-0">{d.icon || '🏷️'}</span>
+                          <span
+                            className="w-2.5 h-2.5 rounded-full shrink-0"
+                            style={{ backgroundColor: d.color }}
+                          />
+                          <span className="font-bold text-slate-700 truncate group-hover:text-emerald-600 transition-colors">{d.name}</span>
+                        </div>
+                        <div className="flex items-center gap-2 font-bold tabular-nums shrink-0">
+                          <span className="text-slate-500 text-[11px] font-semibold">{pct}%</span>
+                          <span className={`text-slate-800 ${globalBlur && !isUnlocked ? 'blur-xs select-none' : ''}`}>
+                            {globalBlur && !isUnlocked ? '••••' : currencyFmt.format(d.value)}
+                          </span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            ) : (
+              <div className="h-60 flex flex-col items-center justify-center text-center gap-2 text-slate-400">
+                <BarChart3 className="w-8 h-8 text-slate-300" />
+                <p className="text-xs font-semibold">Nenhuma despesa registrada este mês</p>
+              </div>
+            )}
+          </motion.div>
+        </div>
 
-              {/* Donut Distribuição de Contas */}
-              <motion.div
-                {...fadeUp}
-                transition={{ duration: 0.4, delay: 0.32 }}
-                className="glass-panel rounded-2xl p-5 md:p-6"
-              >
-                <h3 className="font-bold text-slate-800 mb-4">Distribuição do Saldo</h3>
-                {accountDistributionData.length > 0 ? (
-                  <div className="h-64 md:h-72">
-                    <ReactECharts notMerge={true} lazyUpdate={true} option={donutDistOption} style={{ height: '100%', width: '100%' }} />
-                  </div>
-                ) : (
-                  <div className="h-64 flex flex-col items-center justify-center gap-2 text-slate-400">
-                    <Wallet className="w-10 h-10 text-slate-200" />
-                    <p className="text-sm">Nenhuma conta com saldo positivo</p>
-                  </div>
-                )}
-              </motion.div>
-            </div>
+        {/* Minhas Contas Strip (Only Bank Checking / Savings Accounts) */}
+        <motion.div {...fadeUp} transition={{ duration: 0.35, delay: 0.35 }}>
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="font-bold text-slate-800 text-sm">Distribuição das Minhas Contas</h3>
+            <a href="/accounts" className="text-xs font-bold text-emerald-600 hover:text-emerald-700">Gerenciar contas →</a>
           </div>
-        )}
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
+            {liquidAccounts.map(acc => {
+              const vaultSum = acc.account_vaults?.reduce((sum, v) => sum + Number(v.balance), 0) || 0;
+              return (
+                <div
+                  key={acc.id}
+                  onClick={() => setDetailModal({
+                    title: `Conta: ${acc.name}`,
+                    subtitle: `Movimentações registradas na conta ${acc.name}`,
+                    type: 'account',
+                    accountId: acc.id
+                  })}
+                  className="p-4 rounded-2xl bg-white border border-slate-200/80 shadow-2xs flex items-center justify-between hover:border-emerald-300 hover:shadow-xs transition-all cursor-pointer group"
+                >
+                  <div className="flex items-center gap-3 min-w-0">
+                    <span className="w-10 h-10 rounded-xl bg-slate-100 flex items-center justify-center text-lg shrink-0 group-hover:bg-emerald-50 transition-colors">
+                      {acc.icon || '💳'}
+                    </span>
+                    <div className="min-w-0">
+                      <div className="font-bold text-slate-800 text-xs truncate group-hover:text-emerald-700 transition-colors">{acc.name}</div>
+                      <div className={`font-black text-sm text-slate-900 tabular-nums ${globalBlur && !isUnlocked ? 'blur-xs select-none' : ''}`}>
+                        {globalBlur && !isUnlocked ? '••••' : currencyFmt.format(acc.initial_balance)}
+                      </div>
+                    </div>
+                  </div>
+                  {includeVaults && vaultSum > 0 && (
+                    <div className="text-[10px] font-bold text-emerald-700 bg-emerald-50 px-2 py-1 rounded-lg shrink-0" title="Saldo em cofrinhos">
+                      🐷 {globalBlur && !isUnlocked ? '••••' : currencyFmt.format(vaultSum)}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </motion.div>
 
-
-        {/* Recent Transactions */}
+        {/* Recent Transactions List */}
         <motion.div
           {...fadeUp}
-          transition={{ duration: 0.4, delay: 0.3 }}
-          className="glass-panel rounded-2xl p-5 md:p-6"
+          transition={{ duration: 0.4, delay: 0.4 }}
+          className="glass-panel rounded-2xl p-5 md:p-6 border border-slate-200/80 shadow-xs"
         >
-          <div className="flex justify-between items-center mb-6">
-            <h3 className="font-bold text-slate-800">Transações Recentes</h3>
+          <div className="flex justify-between items-center mb-4">
+            <div>
+              <h3 className="font-bold text-slate-800 text-sm sm:text-base">Últimos Lançamentos</h3>
+              <p className="text-xs text-slate-500 font-medium">Movimentações recentes cadastradas</p>
+            </div>
             {hasData && (
               <a
                 href="/transactions"
-                className="text-sm text-emerald-600 font-semibold hover:text-emerald-700 transition-colors"
+                className="text-xs font-bold text-emerald-600 hover:text-emerald-700 transition-colors"
               >
                 Ver todas →
               </a>
             )}
           </div>
+
           {hasData ? (
             <div className="flex flex-col divide-y divide-slate-100">
               {recentTx.map((t) => {
                 const isIncome = t.type === "income";
                 const isTransfer = t.type === "transfer";
+                const acc = t.account_id ? accountsMap[t.account_id] : ((t as any).account || null);
                 return (
                   <div
                     key={t.id}
-                    className="flex justify-between items-center py-3.5 group hover:bg-slate-50/50 -mx-2 px-2 rounded-lg transition-colors"
+                    className="flex justify-between items-center py-3 group hover:bg-slate-50/60 -mx-2 px-2 rounded-xl transition-all"
                   >
-                    <div className="flex items-center gap-3">
+                    <div className="flex items-center gap-3 min-w-0">
                       <div
-                        className={`w-10 h-10 rounded-xl flex items-center justify-center text-lg ${isTransfer
-                          ? "bg-blue-50 text-blue-600"
-                          : isIncome
+                        className={`w-9 h-9 rounded-xl flex items-center justify-center text-base shrink-0 ${
+                          isTransfer
+                            ? "bg-blue-50 text-blue-600"
+                            : isIncome
                             ? "bg-emerald-50 text-emerald-600"
                             : "bg-rose-50 text-rose-600"
-                          }`}
+                        }`}
                       >
                         {t.category?.icon ? (
                           <span className="text-base">{t.category.icon}</span>
                         ) : isTransfer ? (
-                          <ArrowRightLeft className="w-5 h-5" />
+                          <ArrowRightLeft className="w-4 h-4" />
                         ) : isIncome ? (
-                          <TrendingUp className="w-5 h-5" />
+                          <TrendingUp className="w-4 h-4" />
                         ) : (
-                          <TrendingDown className="w-5 h-5" />
+                          <TrendingDown className="w-4 h-4" />
                         )}
                       </div>
-                      <div>
-                        <div className="font-semibold text-slate-800 text-sm">{t.description}</div>
-                        <div className="text-xs text-slate-400 font-medium">
-                          {t.category?.name || (isTransfer ? "Pagamento de Fatura" : "")}{" "}
-                          · {new Date(t.date + "T12:00:00").toLocaleDateString("pt-BR")}
+                      <div className="min-w-0">
+                        <div className="font-bold text-slate-800 text-xs sm:text-sm truncate">{t.description}</div>
+                        <div className="text-[11px] text-slate-400 font-semibold truncate flex items-center gap-1">
+                          <span>{t.category?.name || (isTransfer ? "Pagamento de Fatura" : "Geral")}</span>
+                          {acc && acc.type === 'credit_card' && (
+                            <span className="text-[10px] font-bold text-slate-600 bg-slate-100 border border-slate-200/80 px-1.5 py-0.2 rounded-md inline-flex items-center gap-1 shrink-0">
+                              💳 {acc.name}
+                            </span>
+                          )}
+                          <span>· {new Date(t.date + "T12:00:00").toLocaleDateString("pt-BR")}</span>
                         </div>
                       </div>
                     </div>
                     <div
-                      className={`font-bold text-sm tabular-nums ${isTransfer
-                        ? "text-blue-600"
-                        : isIncome
+                      className={`font-black text-xs sm:text-sm tabular-nums shrink-0 ${
+                        isTransfer
+                          ? "text-blue-600"
+                          : isIncome
                           ? "text-emerald-600"
                           : "text-rose-600"
-                        }`}
+                      } ${globalBlur && !isUnlocked ? 'blur-xs select-none' : ''}`}
                     >
-                      {isIncome ? "+" : isTransfer ? "" : "-"}{" "}
-                      {currencyFmt.format(Number(t.amount))}
+                      {globalBlur && !isUnlocked ? '••••' : `${isIncome ? "+" : isTransfer ? "" : "-"} ${currencyFmt.format(Number(t.amount))}`}
                     </div>
                   </div>
                 );
               })}
             </div>
           ) : (
-            <div className="flex flex-col items-center justify-center py-12 text-center">
-              <Wallet className="w-12 h-12 text-slate-300 mb-4" />
-              <h2 className="text-lg font-bold text-slate-700 mb-2">Nenhuma transação encontrada</h2>
-              <p className="text-sm text-slate-500 max-w-sm mb-6">
-                Comece adicionando sua primeira receita ou despesa para ver o fluxo de caixa aqui.
+            <div className="flex flex-col items-center justify-center py-10 text-center">
+              <Wallet className="w-10 h-10 text-slate-300 mb-3" />
+              <h2 className="text-sm font-bold text-slate-700 mb-1">Nenhuma transação encontrada</h2>
+              <p className="text-xs text-slate-500 max-w-sm mb-4">
+                Adicione suas primeiras receitas ou despesas para visualizar seu fluxo de caixa aqui.
               </p>
-              <motion.button
-                whileHover={{ scale: 1.03 }}
-                whileTap={{ scale: 0.97 }}
+              <button
                 onClick={() => setIsTxModalOpen(true)}
-                className="btn-primary flex items-center gap-2"
+                className="bg-slate-900 text-white font-bold text-xs px-4 py-2 rounded-xl flex items-center gap-1.5 shadow-md active:scale-95"
               >
-                <Plus className="w-5 h-5" /> Nova Transação
-              </motion.button>
+                <Plus className="w-4 h-4 text-emerald-400" /> Nova Transação
+              </button>
             </div>
           )}
         </motion.div>
@@ -1044,6 +1088,292 @@ export function DashboardClient({
           accounts={accounts}
           onSuccess={() => setIsTxModalOpen(false)}
         />
+      </Modal>
+
+      {/* Modal de Detalhamento ao Clicar em Cards e Gráficos */}
+      <Modal
+        isOpen={Boolean(detailModal)}
+        onClose={() => setDetailModal(null)}
+        title={detailModal?.title || ''}
+      >
+        <div className="space-y-4 pt-1">
+          {detailModal?.subtitle && (
+            <p className="text-xs text-slate-500 font-medium -mt-2">{detailModal.subtitle}</p>
+          )}
+
+          {/* 1. Saldo Consolidado Detail */}
+          {detailModal?.type === 'balance' && (
+            <div className="space-y-4">
+              <div className="p-4 rounded-2xl bg-slate-900 text-white flex justify-between items-center shadow-md">
+                <div>
+                  <div className="text-xs text-slate-400 font-bold uppercase tracking-wider">Total Consolidado</div>
+                  <div className="text-xs text-emerald-400 font-medium">Contas + Cofrinhos</div>
+                </div>
+                <div className="text-2xl font-black tabular-nums">
+                  {globalBlur && !isUnlocked ? '••••' : currencyFmt.format(displayBalance)}
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <div className="text-xs font-bold text-slate-700 uppercase tracking-wider">Contas Bancárias Líquidas</div>
+                <div className="divide-y divide-slate-100 border border-slate-100 rounded-2xl p-2 bg-slate-50/50">
+                  {liquidAccounts.map(acc => (
+                    <div key={acc.id} className="py-2 px-2 flex justify-between items-center text-xs">
+                      <div className="flex items-center gap-2">
+                        <span>{acc.icon || '💳'}</span>
+                        <span className="font-bold text-slate-800">{acc.name}</span>
+                      </div>
+                      <span className="font-black text-slate-900 tabular-nums">
+                        {globalBlur && !isUnlocked ? '••••' : currencyFmt.format(acc.initial_balance)}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {totalInVaults > 0 && (
+                <div className="space-y-2">
+                  <div className="text-xs font-bold text-emerald-800 uppercase tracking-wider flex items-center gap-1">
+                    <span>🐷 Cofrinhos de Guardados</span>
+                  </div>
+                  <div className="p-3 rounded-2xl bg-emerald-50 border border-emerald-100 flex justify-between items-center text-xs">
+                    <span className="font-bold text-emerald-900">Total Guardado em Objetivos</span>
+                    <span className="font-black text-emerald-700 tabular-nums">
+                      {globalBlur && !isUnlocked ? '••••' : currencyFmt.format(totalInVaults)}
+                    </span>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* 2. Entradas do Mês Detail */}
+          {detailModal?.type === 'incomes' && (
+            <div className="space-y-3">
+              <div className="p-4 rounded-2xl bg-emerald-50 border border-emerald-100 flex justify-between items-center shadow-2xs">
+                <div>
+                  <div className="text-xs font-bold text-emerald-800 uppercase">Total de Entradas no Mês</div>
+                  <div className="text-[11px] text-emerald-600 font-medium">{currentMonthTx.filter(t => t.type === 'income').length} lançamentos</div>
+                </div>
+                <div className="text-xl font-black text-emerald-600 tabular-nums">
+                  {globalBlur && !isUnlocked ? '••••' : currencyFmt.format(totalIncomes)}
+                </div>
+              </div>
+
+              <div className="max-h-80 overflow-y-auto divide-y divide-slate-100 pr-1">
+                {currentMonthTx.filter(t => t.type === 'income').map(t => (
+                  <div key={t.id} className="py-2.5 flex justify-between items-center text-xs">
+                    <div className="flex items-center gap-2.5">
+                      <span className="w-8 h-8 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center font-bold text-sm shrink-0">
+                        {t.category?.icon || '🟢'}
+                      </span>
+                      <div>
+                        <div className="font-bold text-slate-800">{t.description}</div>
+                        <div className="text-[11px] text-slate-400 font-medium">
+                          {t.category?.name || 'Receita'} · {new Date(t.date + 'T12:00:00').toLocaleDateString('pt-BR')}
+                        </div>
+                      </div>
+                    </div>
+                    <span className="font-black text-emerald-600 tabular-nums shrink-0">
+                      +{globalBlur && !isUnlocked ? '••••' : currencyFmt.format(Number(t.amount))}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* 3. Saídas do Mês Detail */}
+          {detailModal?.type === 'expenses' && (
+            <div className="space-y-3">
+              <div className="p-4 rounded-2xl bg-rose-50 border border-rose-100 flex justify-between items-center shadow-2xs">
+                <div>
+                  <div className="text-xs font-bold text-rose-800 uppercase">Total de Saídas no Mês</div>
+                  <div className="text-[11px] text-rose-600 font-medium">
+                    {currentMonthTx.filter(t => t.type === 'expense').length} lançamentos
+                  </div>
+                </div>
+                <div className="text-xl font-black text-rose-600 tabular-nums">
+                  {globalBlur && !isUnlocked ? '••••' : currencyFmt.format(totalExpenses)}
+                </div>
+              </div>
+
+              <div className="max-h-80 overflow-y-auto divide-y divide-slate-100 pr-1">
+                {currentMonthTx.filter(t => t.type === 'expense').map(t => {
+                  const acc = t.account_id ? accountsMap[t.account_id] : ((t as any).account || null);
+                  return (
+                    <div key={t.id} className="py-2.5 flex justify-between items-center text-xs">
+                      <div className="flex items-center gap-2.5">
+                        <span className="w-8 h-8 rounded-xl bg-rose-50 text-rose-600 flex items-center justify-center font-bold text-sm shrink-0">
+                          {t.category?.icon || '🔻'}
+                        </span>
+                        <div>
+                          <div className="font-bold text-slate-800">{t.description}</div>
+                          <div className="text-[11px] text-slate-400 font-medium flex items-center gap-1">
+                            <span>{t.category?.name || 'Despesa'}</span>
+                            {acc && acc.type === 'credit_card' && (
+                              <span className="text-[10px] font-bold text-slate-600 bg-slate-100 border border-slate-200/80 px-1.5 py-0.2 rounded-md inline-flex items-center gap-1 shrink-0">
+                                💳 {acc.name}
+                              </span>
+                            )}
+                            <span>· {new Date(t.date + 'T12:00:00').toLocaleDateString('pt-BR')}</span>
+                          </div>
+                        </div>
+                      </div>
+                      <span className="font-black text-rose-600 tabular-nums shrink-0">
+                        -{globalBlur && !isUnlocked ? '••••' : currencyFmt.format(Number(t.amount))}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* 4. Resultado do Mês Detail */}
+          {detailModal?.type === 'result' && (
+            <div className="space-y-3">
+              <div className="grid grid-cols-2 gap-3">
+                <div className="p-3.5 rounded-2xl bg-emerald-50 border border-emerald-100">
+                  <div className="text-[11px] font-bold text-emerald-700 uppercase">Total Entradas</div>
+                  <div className="text-base font-black text-emerald-600 tabular-nums">
+                    {globalBlur && !isUnlocked ? '••••' : currencyFmt.format(totalIncomes)}
+                  </div>
+                </div>
+                <div className="p-3.5 rounded-2xl bg-rose-50 border border-rose-100">
+                  <div className="text-[11px] font-bold text-rose-700 uppercase">Total Saídas</div>
+                  <div className="text-base font-black text-rose-600 tabular-nums">
+                    {globalBlur && !isUnlocked ? '••••' : currencyFmt.format(totalExpenses)}
+                  </div>
+                </div>
+              </div>
+
+              <div className={`p-4 rounded-2xl border ${netMonthlyResult >= 0 ? 'bg-emerald-500/10 border-emerald-200' : 'bg-rose-500/10 border-rose-200'} flex justify-between items-center`}>
+                <div>
+                  <div className="text-xs font-bold text-slate-700 uppercase">Balanço Líquido do Mês</div>
+                  <div className="text-xs text-slate-500 font-medium mt-0.5">Taxa de poupança acumulada: <strong>{savingsRate}%</strong></div>
+                </div>
+                <div className={`text-xl font-black tabular-nums ${netMonthlyResult >= 0 ? 'text-emerald-700' : 'text-rose-600'}`}>
+                  {globalBlur && !isUnlocked ? '••••' : `${netMonthlyResult >= 0 ? '+' : ''}${currencyFmt.format(netMonthlyResult)}`}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* 5. Categoria Detail */}
+          {detailModal?.type === 'category' && (
+            <div className="space-y-3">
+              {(() => {
+                const categoryTx = currentMonthTx.filter(t => {
+                  const resolved = t.category || categories.find(c => c.id === (t as any).category_id);
+                  if (detailModal.categoryName === 'Outros Gastos') {
+                    return t.type === 'expense' && !resolved?.name;
+                  }
+                  return resolved?.name === detailModal.categoryName;
+                });
+                const catSum = categoryTx.reduce((sum, t) => sum + Number(t.amount), 0);
+
+                return (
+                  <>
+                    <div className="p-4 rounded-2xl bg-slate-900 text-white flex justify-between items-center shadow-md">
+                      <div>
+                        <div className="text-xs text-slate-400 font-bold uppercase">Total Nesta Categoria</div>
+                        <div className="text-[11px] text-emerald-400 font-medium">{categoryTx.length} lançamentos</div>
+                      </div>
+                      <div className="text-xl font-black text-emerald-400 tabular-nums">
+                        {globalBlur && !isUnlocked ? '••••' : currencyFmt.format(catSum)}
+                      </div>
+                    </div>
+
+                    <div className="max-h-80 overflow-y-auto divide-y divide-slate-100 pr-1">
+                      {categoryTx.length > 0 ? (
+                        categoryTx.map(t => {
+                          const acc = t.account_id ? accountsMap[t.account_id] : ((t as any).account || null);
+                          return (
+                            <div key={t.id} className="py-2.5 flex justify-between items-center text-xs">
+                              <div className="flex items-center gap-2.5">
+                                <span className="w-8 h-8 rounded-xl bg-slate-100 flex items-center justify-center font-bold text-sm shrink-0">
+                                  {t.category?.icon || '🏷️'}
+                                </span>
+                                <div>
+                                  <div className="font-bold text-slate-800">{t.description}</div>
+                                  <div className="text-[11px] text-slate-400 font-medium flex items-center gap-1">
+                                    {acc && acc.type === 'credit_card' && (
+                                      <span className="text-[10px] font-bold text-slate-600 bg-slate-100 border border-slate-200/80 px-1.5 py-0.2 rounded-md inline-flex items-center gap-1 shrink-0">
+                                        💳 {acc.name}
+                                      </span>
+                                    )}
+                                    <span>· {new Date(t.date + 'T12:00:00').toLocaleDateString('pt-BR')}</span>
+                                  </div>
+                                </div>
+                              </div>
+                              <span className="font-black text-slate-900 tabular-nums shrink-0">
+                                {globalBlur && !isUnlocked ? '••••' : currencyFmt.format(Number(t.amount))}
+                              </span>
+                            </div>
+                          );
+                        })
+                      ) : (
+                        <div className="py-8 text-center text-xs text-slate-400">Nenhum lançamento nesta categoria</div>
+                      )}
+                    </div>
+                  </>
+                );
+              })()}
+            </div>
+          )}
+
+          {/* 6. Conta Detail */}
+          {detailModal?.type === 'account' && (
+            <div className="space-y-3">
+              {(() => {
+                const acc = accounts.find(a => a.id === detailModal.accountId);
+                const accTx = currentMonthTx.filter(t => t.account_id === detailModal.accountId);
+                return (
+                  <>
+                    <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200 flex justify-between items-center">
+                      <div className="flex items-center gap-3">
+                        <span className="w-10 h-10 rounded-xl bg-white border border-slate-200 flex items-center justify-center text-xl shadow-2xs">
+                          {acc?.icon || '💳'}
+                        </span>
+                        <div>
+                          <div className="font-bold text-slate-800 text-sm">{acc?.name}</div>
+                          <div className="text-[11px] text-slate-400 font-medium">{accTx.length} movimentações no mês</div>
+                        </div>
+                      </div>
+                      <div className="text-right">
+                        <div className="text-[10px] text-slate-400 font-bold uppercase">Saldo em Conta</div>
+                        <div className="text-lg font-black text-slate-900 tabular-nums">
+                          {globalBlur && !isUnlocked ? '••••' : currencyFmt.format(acc?.initial_balance || 0)}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="max-h-80 overflow-y-auto divide-y divide-slate-100 pr-1">
+                      {accTx.length > 0 ? (
+                        accTx.map(t => (
+                          <div key={t.id} className="py-2.5 flex justify-between items-center text-xs">
+                            <div>
+                              <div className="font-bold text-slate-800">{t.description}</div>
+                              <div className="text-[11px] text-slate-400 font-medium">
+                                {t.category?.name || 'Geral'} · {new Date(t.date + 'T12:00:00').toLocaleDateString('pt-BR')}
+                              </div>
+                            </div>
+                            <span className={`font-black tabular-nums shrink-0 ${t.type === 'income' ? 'text-emerald-600' : 'text-rose-600'}`}>
+                              {globalBlur && !isUnlocked ? '••••' : `${t.type === 'income' ? '+' : '-'}${currencyFmt.format(Number(t.amount))}`}
+                            </span>
+                          </div>
+                        ))
+                      ) : (
+                        <div className="py-8 text-center text-xs text-slate-400">Nenhuma movimentação cadastrada nesta conta no mês</div>
+                      )}
+                    </div>
+                  </>
+                );
+              })()}
+            </div>
+          )}
+        </div>
       </Modal>
     </>
   );

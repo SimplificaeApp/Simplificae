@@ -95,6 +95,8 @@ export async function transferToVault(prevState: any, formData: FormData) {
   const action = formData.get('action') as 'deposit' | 'withdraw'
   const amountStr = formData.get('amount') as string
   const amount = amountStr ? parseFloat(amountStr.replace(/[^\d,-]/g, '').replace(',', '.')) : 0
+  const createTx = formData.get('create_transaction') === 'true'
+  const category_id = formData.get('category_id') as string
 
   if (!vault_id || !action || isNaN(amount) || amount <= 0) {
     return { error: 'Dados inválidos para a transferência.' }
@@ -103,7 +105,7 @@ export async function transferToVault(prevState: any, formData: FormData) {
   // Obter o cofrinho atual e a conta
   const { data: vault, error: fetchError } = await supabase
     .from('account_vaults')
-    .select('*, account:accounts(id, initial_balance)')
+    .select('*, account:accounts(id, workspace_id, initial_balance)')
     .eq('id', vault_id)
     .single()
 
@@ -111,13 +113,10 @@ export async function transferToVault(prevState: any, formData: FormData) {
     return { error: 'Cofrinho não encontrado.' }
   }
 
-  const accountInitialBalance = Number((vault.account as any).initial_balance)
+  const accountObj = vault.account as any
+  const accountInitialBalance = Number(accountObj.initial_balance)
 
   if (action === 'deposit') {
-    // Para guardar, verifica se tem saldo na conta
-    // Idealmente seria o saldo atual (incluindo transações), mas usaremos o initial_balance por enquanto 
-    // ou se o Dashboard usa initial_balance como base para o saldo atual.
-    // Vamos apenas focar no initial_balance
     if (amount > accountInitialBalance) {
       return { error: 'Saldo disponível insuficiente na conta para este depósito.' }
     }
@@ -150,11 +149,30 @@ export async function transferToVault(prevState: any, formData: FormData) {
   const { error: updateAccountError } = await supabase
     .from('accounts')
     .update({ initial_balance: newAccountBalance })
-    .eq('id', (vault.account as any).id)
+    .eq('id', accountObj.id)
     
   if (updateAccountError) {
     console.error('Erro ao atualizar saldo da conta:', updateAccountError)
-    // Se der erro aqui o ideal seria rollback, mas como é simples vamos prosseguir
+  }
+
+  // Criar transação de aporte para contabilizar como investimento no Planejamento
+  if (action === 'deposit' && createTx && category_id) {
+    const today = new Date().toISOString().split('T')[0]
+    const { error: txError } = await supabase.from('transactions').insert([{
+      workspace_id: accountObj.workspace_id,
+      account_id: accountObj.id,
+      category_id,
+      type: 'expense',
+      amount,
+      description: `Aporte no cofrinho: ${vault.name}`,
+      date: today,
+      status: 'posted',
+      ignore_in_cashflow: false
+    }])
+
+    if (txError) {
+      console.error('Erro ao registrar transação de aporte:', txError)
+    }
   }
 
   revalidatePath('/', 'layout')

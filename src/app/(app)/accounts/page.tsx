@@ -10,11 +10,13 @@ export default async function AccountsPage() {
   const [
     { data: { user } },
     { data: workspaces },
-    { data: accountsData }
+    { data: accountsData },
+    { data: categoriesData }
   ] = await Promise.all([
     supabase.auth.getUser(),
     supabase.from('workspaces').select('id, name, type').order('created_at', { ascending: true }),
-    supabase.from('accounts').select('*, account_vaults(*)').neq('type', 'credit_card').order('created_at', { ascending: true })
+    supabase.from('accounts').select('*, account_vaults(*)').neq('type', 'credit_card').order('created_at', { ascending: true }),
+    supabase.from('categories').select('*').order('name', { ascending: true })
   ])
 
   if (!user) {
@@ -23,6 +25,7 @@ export default async function AccountsPage() {
 
   const currentWorkspace = workspaces && workspaces.length > 0 ? workspaces[0] : null
   const accounts = accountsData || []
+  const categories = categoriesData || []
 
   return (
     <main className="flex-1 p-4 md:p-6 lg:p-8 max-w-7xl mx-auto w-full">
@@ -33,6 +36,7 @@ export default async function AccountsPage() {
       <AccountsClient 
         workspaceId={currentWorkspace?.id} 
         accounts={accounts} 
+        categories={categories}
       />
     </main>
   )

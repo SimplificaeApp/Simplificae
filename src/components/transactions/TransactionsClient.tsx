@@ -329,10 +329,21 @@ export function TransactionsClient({
     ...categories.map(c => ({ id: c.id, label: c.name, icon: c.icon }))
   ], [categories])
 
-  const accountOptions = useMemo(() => [
-    { id: 'all', label: 'Todas as Contas', icon: '💳' },
-    ...accounts.map(a => ({ id: a.id, label: a.name, icon: a.icon }))
-  ], [accounts])
+  const accountOptions = useMemo(() => {
+    const bankAccs = accounts
+      .filter(a => a.type !== 'credit_card')
+      .map(a => ({ id: a.id, label: a.name, icon: a.icon || '🏦', group: '🏦 Contas Bancárias' }))
+
+    const ccAccs = accounts
+      .filter(a => a.type === 'credit_card')
+      .map(a => ({ id: a.id, label: a.name, icon: a.icon || '💳', group: '💳 Cartões de Crédito' }))
+
+    return [
+      { id: 'all', label: 'Todas as Contas', icon: '📊' },
+      ...bankAccs,
+      ...ccAccs
+    ]
+  }, [accounts])
 
   return (
     <>

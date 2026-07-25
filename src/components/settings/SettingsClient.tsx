@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useTransition } from 'react'
-import { Wallet, Tags, Plus, Trash2, Edit2, CalendarDays } from 'lucide-react'
+import { Wallet, Tags, Plus, Trash2, Edit2, CalendarDays, Loader2 } from 'lucide-react'
 import { Modal } from '@/components/ui/Modal'
 
 import { CategoryForm } from './CategoryForm'
@@ -37,6 +37,7 @@ export function SettingsClient({
   const [activeTab, setActiveTab] = useState<'categories' | 'preferences' | 'privacy'>('categories')
   const [isModalOpen, setIsModalOpen] = useState(false)
   const [editingCategory, setEditingCategory] = useState<Category | null>(null)
+  const [deletingCategory, setDeletingCategory] = useState<Category | null>(null)
   const [isPending, startTransition] = useTransition()
   
   const [pin, setPin] = useState(initialPin || '')
@@ -46,22 +47,9 @@ export function SettingsClient({
   const expenses = categories.filter(c => c.type === 'expense' && !c.is_investment)
   const investments = categories.filter(c => c.is_investment)
 
-  const handleDeleteCategory = (id: string, e: React.MouseEvent) => {
+  const handleDeleteCategory = (cat: Category, e: React.MouseEvent) => {
     e.stopPropagation()
-    toast('Deseja excluir esta categoria?', {
-      description: 'Esta ação não poderá ser desfeita e falhará se existirem transações vinculadas.',
-      action: {
-        label: 'Sim, excluir',
-        onClick: () => {
-          startTransition(async () => {
-            const res = await deleteCategory(id)
-            if (res?.error) toast.error(res.error)
-            else toast.success(res.success)
-          })
-        }
-      },
-      cancel: { label: 'Cancelar', onClick: () => { } }
-    })
+    setDeletingCategory(cat)
   }
 
   const handleEditCategory = (cat: Category) => {
@@ -165,7 +153,7 @@ export function SettingsClient({
                         <Edit2 className="w-4 h-4" />
                       </button>
                       <button 
-                        onClick={(e) => handleDeleteCategory(cat.id, e)}
+                        onClick={(e) => handleDeleteCategory(cat, e)}
                         disabled={isPending}
                         className="p-1.5 text-slate-400 hover:text-rose-600 active:scale-95"
                         title="Excluir"
@@ -213,7 +201,7 @@ export function SettingsClient({
                         <Edit2 className="w-4 h-4" />
                       </button>
                       <button 
-                        onClick={(e) => handleDeleteCategory(cat.id, e)}
+                        onClick={(e) => handleDeleteCategory(cat, e)}
                         disabled={isPending}
                         className="p-1.5 text-slate-400 hover:text-rose-600 active:scale-95"
                         title="Excluir"
@@ -257,7 +245,7 @@ export function SettingsClient({
                           <Edit2 className="w-4 h-4" />
                         </button>
                         <button 
-                          onClick={(e) => handleDeleteCategory(cat.id, e)}
+                          onClick={(e) => handleDeleteCategory(cat, e)}
                           disabled={isPending}
                           className="p-1.5 text-slate-400 hover:text-rose-600 active:scale-95"
                           title="Excluir"
@@ -268,65 +256,65 @@ export function SettingsClient({
                     </div>
                   ))
                 ) : (
-                  <p className="text-xs text-slate-400 col-span-full">Nenhuma categoria marcada como investimento ainda. Ao criar ou editar uma categoria, marque a opção "É um Investimento".</p>
+                  <p className="text-xs text-slate-400 col-span-full">Nenhuma categoria marcada como investimento ainda. Ao criar ou editar uma categoria, escolha o tipo "Investimento".</p>
                 )}
               </div>
             </div>
           </div>
         )}
 
+        {/* Preferencias de ciclo */}
         {activeTab === 'preferences' && (
-          <div className="flex flex-col gap-5 max-w-lg">
-            <div className="flex flex-col gap-2">
-              <label className="text-xs sm:text-sm font-bold text-slate-700">Dia de Virada do Mês / Renovação do Orçamento</label>
-              <p className="text-xs text-slate-500 leading-relaxed">
-                Define em qual dia do mês o seu ciclo financeiro recomeça. Por exemplo, se você recebe seu salário no dia 5, selecione 5 para que seu orçamento vá do dia 5 até o dia 4 do mês seguinte.
+          <div className="flex flex-col gap-6 max-w-xl">
+            <div className="bg-slate-50 border border-slate-200/80 p-4 rounded-xl">
+              <h3 className="font-bold text-slate-800 text-sm mb-1">Dia de Virada do Mês Financeiro</h3>
+              <p className="text-xs text-slate-500 mb-4">
+                Define em qual dia do mês o seu ciclo financeiro recomeça. Por exemplo, se você recebe dia 5, coloque 5 para que os gastos do mês sejam contados do dia 5 até o dia 4 do mês seguinte.
               </p>
-              <div className="flex items-center gap-3 mt-2">
-                <input
-                  type="number"
-                  min={1}
-                  max={31}
+              
+              <div className="flex items-center gap-3">
+                <label className="text-xs font-bold text-slate-700 shrink-0">Dia da Virada:</label>
+                <select
                   value={turnoverDay}
-                  onChange={(e) => setTurnoverDay(Math.min(31, Math.max(1, parseInt(e.target.value) || 1)))}
-                  className="w-20 sm:w-24 px-3 sm:px-4 py-2.5 sm:py-3 rounded-xl border border-slate-200 bg-slate-50/50 text-slate-800 font-bold focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all duration-200 text-sm"
-                />
-                <span className="text-xs sm:text-sm text-slate-600 font-medium">de cada mês</span>
+                  onChange={(e) => setTurnoverDay(Number(e.target.value))}
+                  className="px-3 py-2 rounded-xl border border-slate-200 bg-white text-slate-800 font-bold text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500"
+                >
+                  {Array.from({ length: 28 }, (_, i) => i + 1).map(day => (
+                    <option key={day} value={day}>Dia {day}</option>
+                  ))}
+                </select>
+                <button
+                  type="button"
+                  disabled={isPending}
+                  onClick={handleSaveTurnoverDay}
+                  className="bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold px-4 py-2.5 rounded-xl transition-all disabled:opacity-70 active:scale-95"
+                >
+                  {isPending ? 'Salvando...' : 'Salvar Alteração'}
+                </button>
               </div>
             </div>
-
-            <button 
-              onClick={handleSaveTurnoverDay}
-              disabled={isPending}
-              className="bg-slate-900 hover:bg-slate-800 text-white font-bold py-3 px-6 rounded-xl transition-all self-start w-full sm:w-auto text-xs sm:text-sm disabled:opacity-70 active:scale-95"
-            >
-              {isPending ? 'Salvando...' : 'Salvar Preferências'}
-            </button>
           </div>
         )}
 
+        {/* Privacidade */}
         {activeTab === 'privacy' && (
           <form 
             action={async (formData) => {
-              startTransition(async () => {
-                const res = await updatePrivacyPin(null, formData)
-                if (res?.error) toast.error(res.error)
-                else toast.success(res.success)
-              })
-            }} 
-            className="flex flex-col gap-5"
+              const res = await updatePrivacyPin(null, formData)
+              if (res?.error) toast.error(res.error)
+              else toast.success(res.success)
+            }}
+            className="flex flex-col gap-4 max-w-xl"
           >
-            <div className="flex flex-col gap-2">
-              <label className="text-xs sm:text-sm font-bold text-slate-700">PIN de 4 dígitos</label>
-              <p className="text-xs text-slate-500 leading-relaxed mb-1">
-                Configure uma senha numérica para visualizar contas e cofrinhos marcados como "Ocultos", bem como para habilitar o modo oculto no Dashboard.
+            <div>
+              <h3 className="font-bold text-slate-800 text-sm mb-1">PIN de Proteção e Privacidade</h3>
+              <p className="text-xs text-slate-500 mb-3">
+                Defina um PIN numérico de 4 dígitos para proteger saldos ocultos e informações confidenciais.
               </p>
-              <input
+              <input 
                 type="password"
                 name="pin"
-                inputMode="numeric"
                 maxLength={4}
-                pattern="^$|\d{4}"
                 value={pin}
                 onChange={(e) => setPin(e.target.value.replace(/\D/g, ''))}
                 placeholder="Ex: 1234 (Deixe vazio para remover)"
@@ -345,6 +333,7 @@ export function SettingsClient({
         )}
       </motion.div>
 
+      {/* Category Creation / Edit Modal */}
       <Modal 
         isOpen={isModalOpen} 
         onClose={() => {
@@ -362,7 +351,57 @@ export function SettingsClient({
           }} 
         />
       </Modal>
+
+      {/* Category Delete Confirmation Modal */}
+      <Modal
+        isOpen={Boolean(deletingCategory)}
+        onClose={() => setDeletingCategory(null)}
+        title="Excluir Categoria"
+      >
+        {deletingCategory && (
+          <div className="flex flex-col gap-4">
+            <div className="flex items-center gap-3.5 p-4 bg-rose-50 border border-rose-100 rounded-2xl">
+              <div className="w-12 h-12 rounded-xl bg-rose-100 flex items-center justify-center text-rose-600 shrink-0 text-xl">
+                {deletingCategory.icon || '🗑️'}
+              </div>
+              <div className="min-w-0">
+                <h4 className="font-bold text-slate-900 text-sm truncate">
+                  Excluir "{deletingCategory.name}"?
+                </h4>
+                <p className="text-xs text-slate-500 mt-0.5 leading-relaxed">
+                  Esta ação não poderá ser desfeita e falhará se existirem transações vinculadas.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-3 pt-2">
+              <button
+                type="button"
+                onClick={() => setDeletingCategory(null)}
+                className="px-4 py-2.5 rounded-xl border border-slate-200 text-slate-700 font-bold hover:bg-slate-50 transition-colors text-xs active:scale-95"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                disabled={isPending}
+                onClick={() => {
+                  const targetId = deletingCategory.id
+                  setDeletingCategory(null)
+                  startTransition(async () => {
+                    const res = await deleteCategory(targetId)
+                    if (res?.error) toast.error(res.error)
+                    else toast.success(res.success)
+                  })
+                }}
+                className="px-4 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-bold transition-all text-xs shadow-md disabled:opacity-70 flex items-center gap-1.5 active:scale-95"
+              >
+                {isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Sim, Excluir'}
+              </button>
+            </div>
+          </div>
+        )}
+      </Modal>
     </div>
   )
 }
-

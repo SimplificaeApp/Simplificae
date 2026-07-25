@@ -23,15 +23,19 @@ interface CategoryFormProps {
     is_fixed?: boolean
     is_investment?: boolean
   } | null
-  onSuccess?: () => void
+  onSuccess?: (createdCategory?: any) => void
 }
 
-type State = { error?: string; success?: string }
+interface State {
+  error?: string
+  success?: string
+  category?: any
+}
 const initialState: State = {}
 
 export function CategoryForm({ workspaceId, initialData, onSuccess }: CategoryFormProps) {
   const isEditing = Boolean(initialData && initialData.id)
-  const actionFn = isEditing ? updateCategory.bind(null, initialData!.id) : createCategory
+  const actionFn = (isEditing ? updateCategory.bind(null, initialData!.id) : createCategory) as (state: State, formData: FormData) => Promise<State>
   const [state, formAction, pending] = useActionState(actionFn, initialState)
 
   const [showEmojiPicker, setShowEmojiPicker] = useState(false)
@@ -61,9 +65,9 @@ export function CategoryForm({ workspaceId, initialData, onSuccess }: CategoryFo
 
   useEffect(() => {
     if (state.success && onSuccess) {
-      onSuccess()
+      onSuccess(state.category)
     }
-  }, [state.success, onSuccess])
+  }, [state.success, state.category, onSuccess])
 
   const effectiveType = categoryKind === 'income' ? 'income' : 'expense'
   const effectiveIsInvestment = categoryKind === 'investment'
@@ -128,8 +132,8 @@ export function CategoryForm({ workspaceId, initialData, onSuccess }: CategoryFo
       </div>
 
       <div className="group">
-        <label className="block text-sm font-bold text-slate-700 mb-1.5 transition-colors group-focus-within:text-emerald-600">
-          Tipo da Categoria
+        <label className="block text-sm font-bold text-slate-700 mb-2">
+          Tipo de Fluxo
         </label>
         <div className="grid grid-cols-3 gap-2">
           <button
@@ -138,14 +142,14 @@ export function CategoryForm({ workspaceId, initialData, onSuccess }: CategoryFo
               setCategoryKind('expense')
               if (selectedEmoji === '💎' || selectedEmoji === '💰') setSelectedEmoji('💸')
             }}
-            className={`py-2.5 px-2 rounded-xl border text-xs font-bold transition-all flex flex-col items-center gap-1 ${
+            className={`p-3 rounded-xl border text-center flex flex-col items-center gap-1 transition-all ${
               categoryKind === 'expense'
-                ? 'bg-rose-50 border-rose-300 text-rose-700 shadow-xs'
-                : 'bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100'
+                ? 'bg-rose-50 border-rose-500 text-rose-700 ring-2 ring-rose-500/20 font-bold shadow-xs scale-[1.02]'
+                : 'bg-slate-50/70 border-slate-200 text-slate-600 hover:bg-slate-100 font-semibold'
             }`}
           >
-            <span className="text-base">💸</span>
-            <span>Despesa</span>
+            <span className="text-xl">🔻</span>
+            <span className="text-xs">Despesa</span>
           </button>
 
           <button
@@ -154,14 +158,14 @@ export function CategoryForm({ workspaceId, initialData, onSuccess }: CategoryFo
               setCategoryKind('income')
               if (selectedEmoji === '💸' || selectedEmoji === '💎') setSelectedEmoji('💰')
             }}
-            className={`py-2.5 px-2 rounded-xl border text-xs font-bold transition-all flex flex-col items-center gap-1 ${
+            className={`p-3 rounded-xl border text-center flex flex-col items-center gap-1 transition-all ${
               categoryKind === 'income'
-                ? 'bg-emerald-50 border-emerald-300 text-emerald-700 shadow-xs'
-                : 'bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100'
+                ? 'bg-emerald-50 border-emerald-500 text-emerald-700 ring-2 ring-emerald-500/20 font-bold shadow-xs scale-[1.02]'
+                : 'bg-slate-50/70 border-slate-200 text-slate-600 hover:bg-slate-100 font-semibold'
             }`}
           >
-            <span className="text-base">💰</span>
-            <span>Receita</span>
+            <span className="text-xl">🟢</span>
+            <span className="text-xs">Receita</span>
           </button>
 
           <button
@@ -170,14 +174,14 @@ export function CategoryForm({ workspaceId, initialData, onSuccess }: CategoryFo
               setCategoryKind('investment')
               if (selectedEmoji === '💸' || selectedEmoji === '💰') setSelectedEmoji('💎')
             }}
-            className={`py-2.5 px-2 rounded-xl border text-xs font-bold transition-all flex flex-col items-center gap-1 ${
+            className={`p-3 rounded-xl border text-center flex flex-col items-center gap-1 transition-all ${
               categoryKind === 'investment'
-                ? 'bg-purple-50 border-purple-300 text-purple-700 shadow-xs ring-1 ring-purple-400'
-                : 'bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100'
+                ? 'bg-purple-50 border-purple-500 text-purple-700 ring-2 ring-purple-500/20 font-bold shadow-xs scale-[1.02]'
+                : 'bg-slate-50/70 border-slate-200 text-slate-600 hover:bg-slate-100 font-semibold'
             }`}
           >
-            <span className="text-base">💎</span>
-            <span>Investimento</span>
+            <span className="text-xl">💎</span>
+            <span className="text-xs">Investimento</span>
           </button>
         </div>
       </div>

@@ -164,6 +164,8 @@ export function VaultForm({ accountId, initialData, onSuccess }: VaultFormProps)
             id="balance"
             name="balance"
             type="text"
+            inputMode="numeric"
+            pattern="[0-9]*"
             value={balance}
             onChange={handleBalanceChange}
             placeholder="0,00"
@@ -182,9 +184,12 @@ export function VaultForm({ accountId, initialData, onSuccess }: VaultFormProps)
             id="target_amount"
             name="target_amount"
             type="text"
+            inputMode="numeric"
+            pattern="[0-9]*"
             value={target}
             onChange={handleTargetChange}
             placeholder="0,00"
+            className="w-full pl-12 pr-4 py-3 rounded-xl border border-slate-200 bg-slate-50/50 text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all duration-200 font-medium"
           />
         </div>
       </div>

@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useActionState, useEffect, startTransition, useRef } from 'react'
+import { useState, useActionState, useEffect, useMemo, startTransition, useRef } from 'react'
 import { toast } from 'sonner'
 import { useRouter } from 'next/navigation'
 import { createTransaction, updateTransaction, deleteTransaction } from '@/app/actions/transactions'
@@ -23,6 +23,8 @@ import {
   X
 } from 'lucide-react'
 import { motion, AnimatePresence } from 'framer-motion'
+import { CategoryForm } from '@/components/settings/CategoryForm'
+import { Modal } from '@/components/ui/Modal'
 
 interface Category {
   id: string
@@ -60,7 +62,7 @@ function CustomSelect({
   name: string
   value: string
   onChange: (val: string) => void
-  options: { id: string; label: string; icon?: string }[]
+  options: { id: string; label: string; icon?: string; group?: string }[]
   placeholder: string
   required?: boolean
 }) {
@@ -100,35 +102,47 @@ function CustomSelect({
               animate={{ opacity: 1, y: 4, scale: 1 }}
               exit={{ opacity: 0, y: -6, scale: 0.98 }}
               transition={{ duration: 0.15 }}
-              className="absolute left-0 right-0 top-full z-50 max-h-52 overflow-y-auto bg-white/98 backdrop-blur-md border border-slate-200 rounded-2xl shadow-xl p-1.5 flex flex-col gap-1 no-scrollbar"
+              className="absolute left-0 right-0 top-full z-50 max-h-60 overflow-y-auto bg-white/98 backdrop-blur-md border border-slate-200 rounded-2xl shadow-xl p-1.5 flex flex-col gap-0.5 no-scrollbar"
             >
               {options.length === 0 ? (
                 <div className="p-3 text-xs text-slate-400 text-center font-medium">Nenhuma opção disponível</div>
               ) : (
-                options.map(opt => {
-                  const isSelected = opt.id === value
-                  return (
-                    <button
-                      key={opt.id}
-                      type="button"
-                      onClick={() => {
-                        onChange(opt.id)
-                        setIsOpen(false)
-                      }}
-                      className={`flex items-center justify-between w-full px-3 py-2.5 rounded-xl text-xs sm:text-sm font-semibold transition-all ${
-                        isSelected 
-                          ? 'bg-emerald-50 text-emerald-800 font-bold' 
-                          : 'text-slate-700 hover:bg-slate-50 hover:text-slate-900'
-                      }`}
-                    >
-                      <div className="flex items-center gap-2.5 truncate">
-                        {opt.icon && <span className="text-base shrink-0">{opt.icon}</span>}
-                        <span className="truncate">{opt.label}</span>
+                (() => {
+                  let lastGroup: string | undefined = undefined;
+                  return options.map(opt => {
+                    const isSelected = opt.id === value;
+                    const showGroupHeader = opt.group && opt.group !== lastGroup;
+                    if (opt.group) lastGroup = opt.group;
+
+                    return (
+                      <div key={opt.id} className="flex flex-col">
+                        {showGroupHeader && (
+                          <div className="px-3 py-1.5 text-[10px] font-black uppercase tracking-wider text-slate-400 bg-slate-50/90 rounded-lg my-1 border-y border-slate-100/80">
+                            {opt.group}
+                          </div>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            onChange(opt.id)
+                            setIsOpen(false)
+                          }}
+                          className={`flex items-center justify-between w-full px-3 py-2 rounded-xl text-xs sm:text-sm font-semibold transition-all ${
+                            isSelected 
+                              ? 'bg-emerald-50 text-emerald-800 font-bold' 
+                              : 'text-slate-700 hover:bg-slate-50 hover:text-slate-900'
+                          }`}
+                        >
+                          <div className="flex items-center gap-2.5 truncate">
+                            {opt.icon && <span className="text-base shrink-0">{opt.icon}</span>}
+                            <span className="truncate">{opt.label}</span>
+                          </div>
+                          {isSelected && <Check className="w-4 h-4 text-emerald-600 shrink-0 ml-2" />}
+                        </button>
                       </div>
-                      {isSelected && <Check className="w-4 h-4 text-emerald-600 shrink-0 ml-2" />}
-                    </button>
-                  )
-                })
+                    );
+                  });
+                })()
               )}
             </motion.div>
           </>
@@ -168,13 +182,25 @@ export function TransactionForm({
   const [destinationAccountId, setDestinationAccountId] = useState<string>(initialData?.destination_account_id || '')
   const [isPlanned, setIsPlanned] = useState(initialData?.status === 'pending' || false)
   
-  // Frequency mode: 1 = Single, -1 = Recurring/Fixo, >1 = Installments
   const [freqMode, setFreqMode] = useState<'single' | 'recurring' | 'installment'>('single')
   const [installments, setInstallments] = useState(2)
   const [recurringMonths, setRecurringMonths] = useState(12)
   const [isIndefinite, setIsIndefinite] = useState(true)
 
   const [updateScope, setUpdateScope] = useState<'single' | 'future'>('single')
+  
+  const groupedAccountOptions = useMemo(() => {
+    const bankAccs = accounts
+      .filter((a: any) => a.type !== 'credit_card')
+      .map((a: any) => ({ id: a.id, label: a.name, icon: a.icon || '🏦', group: '🏦 Contas Bancárias' }))
+
+    const ccAccs = accounts
+      .filter((a: any) => a.type === 'credit_card')
+      .map((a: any) => ({ id: a.id, label: a.name, icon: a.icon || '💳', group: '💳 Cartões de Crédito' }))
+
+    return [...bankAccs, ...ccAccs]
+  }, [accounts])
+
   const [scopeModalMode, setScopeModalMode] = useState<'edit' | 'delete' | null>(null)
   const [isConfirmedSubmit, setIsConfirmedSubmit] = useState(false)
 
@@ -237,6 +263,13 @@ export function TransactionForm({
     executeDelete(scope)
   }
 
+  const [isAddCategoryModalOpen, setIsAddCategoryModalOpen] = useState(false)
+  const [localCategories, setLocalCategories] = useState<Category[]>(categories)
+
+  useEffect(() => {
+    setLocalCategories(categories)
+  }, [categories])
+
   const handleAmountChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     let value = e.target.value.replace(/\D/g, '')
     if (value.length > 0) {
@@ -246,7 +279,7 @@ export function TransactionForm({
     setAmount(value)
   }
 
-  const activeCategories = categories.filter(c => c.type === type)
+  const activeCategories = localCategories.filter(c => c.type === type)
   const isExpense = type === 'expense'
   const isTransfer = type === 'transfer'
 
@@ -369,9 +402,18 @@ export function TransactionForm({
 
         {!isTransfer ? (
           <div className="group">
-            <label className="block text-xs font-bold text-slate-700 mb-1">
-              Categoria
-            </label>
+            <div className="flex items-center justify-between mb-1">
+              <label className="block text-xs font-bold text-slate-700">
+                Categoria
+              </label>
+              <button
+                type="button"
+                onClick={() => setIsAddCategoryModalOpen(true)}
+                className="text-[11px] font-bold text-emerald-600 hover:text-emerald-700 flex items-center gap-1 hover:underline cursor-pointer active:scale-95 transition-all"
+              >
+                <Plus className="w-3.5 h-3.5" /> Nova Categoria
+              </button>
+            </div>
             <CustomSelect
               name="category_id"
               value={categoryId}
@@ -392,7 +434,7 @@ export function TransactionForm({
               onChange={setDestinationAccountId}
               placeholder="Selecione a conta..."
               required={isTransfer}
-              options={accounts.map(a => ({ id: a.id, label: a.name, icon: a.icon || '💳' }))}
+              options={groupedAccountOptions}
             />
           </div>
         )}
@@ -410,7 +452,7 @@ export function TransactionForm({
               onChange={setAccountId}
               placeholder="Selecione a conta..."
               required
-              options={accounts.map(a => ({ id: a.id, label: a.name, icon: a.icon || '💳' }))}
+              options={groupedAccountOptions}
             />
           </div>
         )}
@@ -665,6 +707,26 @@ export function TransactionForm({
           </div>
         )}
       </AnimatePresence>
+
+      {/* Quick Category Creation Modal */}
+      <Modal
+        isOpen={isAddCategoryModalOpen}
+        onClose={() => setIsAddCategoryModalOpen(false)}
+        title="Nova Categoria"
+      >
+        <CategoryForm
+          workspaceId={workspaceId}
+          initialData={null}
+          onSuccess={(newCat) => {
+            setIsAddCategoryModalOpen(false)
+            if (newCat && newCat.id) {
+              setLocalCategories(prev => [...prev, newCat])
+              setCategoryId(newCat.id)
+              toast.success(`Categoria "${newCat.name}" criada e selecionada!`)
+            }
+          }}
+        />
+      </Modal>
     </form>
   )
 }

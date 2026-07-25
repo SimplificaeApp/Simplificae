@@ -9,6 +9,7 @@ export interface SelectOption {
   label: string
   icon?: string
   color?: string
+  group?: string
 }
 
 interface CustomSelectProps {
@@ -62,35 +63,47 @@ export function CustomSelect({
               animate={{ opacity: 1, y: 4, scale: 1 }}
               exit={{ opacity: 0, y: -6, scale: 0.98 }}
               transition={{ duration: 0.15 }}
-              className="absolute left-0 right-0 top-full z-50 max-h-56 overflow-y-auto bg-white/98 backdrop-blur-md border border-slate-200/90 rounded-2xl shadow-xl p-1.5 flex flex-col gap-1 no-scrollbar min-w-[180px]"
+              className="absolute left-0 right-0 top-full z-50 max-h-64 overflow-y-auto bg-white/98 backdrop-blur-md border border-slate-200/90 rounded-2xl shadow-xl p-1.5 flex flex-col gap-0.5 no-scrollbar min-w-[200px]"
             >
               {options.length === 0 ? (
                 <div className="p-3 text-xs text-slate-400 text-center font-medium">Nenhuma opção disponível</div>
               ) : (
-                options.map(opt => {
-                  const isSelected = opt.id === value
-                  return (
-                    <button
-                      key={opt.id}
-                      type="button"
-                      onClick={() => {
-                        onChange(opt.id)
-                        setIsOpen(false)
-                      }}
-                      className={`flex items-center justify-between w-full px-3 py-2.5 rounded-xl text-xs sm:text-sm font-semibold transition-all ${
-                        isSelected 
-                          ? 'bg-emerald-50 text-emerald-800 font-bold' 
-                          : 'text-slate-700 hover:bg-slate-50 hover:text-slate-900'
-                      }`}
-                    >
-                      <div className="flex items-center gap-2.5 truncate">
-                        {opt.icon && <span className="text-base shrink-0">{opt.icon}</span>}
-                        <span className="truncate">{opt.label}</span>
+                (() => {
+                  let lastGroup: string | undefined = undefined;
+                  return options.map(opt => {
+                    const isSelected = opt.id === value;
+                    const showGroupHeader = opt.group && opt.group !== lastGroup;
+                    if (opt.group) lastGroup = opt.group;
+
+                    return (
+                      <div key={opt.id} className="flex flex-col">
+                        {showGroupHeader && (
+                          <div className="px-3 py-1.5 text-[10px] font-black uppercase tracking-wider text-slate-400 bg-slate-50/90 rounded-lg my-1 border-y border-slate-100/80">
+                            {opt.group}
+                          </div>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            onChange(opt.id)
+                            setIsOpen(false)
+                          }}
+                          className={`flex items-center justify-between w-full px-3 py-2 rounded-xl text-xs sm:text-sm font-semibold transition-all ${
+                            isSelected 
+                              ? 'bg-emerald-50 text-emerald-800 font-bold' 
+                              : 'text-slate-700 hover:bg-slate-50 hover:text-slate-900'
+                          }`}
+                        >
+                          <div className="flex items-center gap-2.5 truncate">
+                            {opt.icon && <span className="text-base shrink-0">{opt.icon}</span>}
+                            <span className="truncate">{opt.label}</span>
+                          </div>
+                          {isSelected && <Check className="w-4 h-4 text-emerald-600 shrink-0 ml-2" />}
+                        </button>
                       </div>
-                      {isSelected && <Check className="w-4 h-4 text-emerald-600 shrink-0 ml-2" />}
-                    </button>
-                  )
-                })
+                    );
+                  });
+                })()
               )}
             </motion.div>
           </>
