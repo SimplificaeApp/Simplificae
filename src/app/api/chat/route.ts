@@ -40,6 +40,18 @@ Regras:
 4. Se o usuário perguntar algo que você não consegue responder com os dados disponíveis, diga claramente
 5. Responda SEMPRE em português do Brasil`
 
+  const summarySchema = z.object({
+    month: z.number().min(1).max(12).describe('Mês (1-12)'),
+    year: z.number().describe('Ano (ex: 2025)'),
+  })
+
+  const searchSchema = z.object({
+    query: z.string().describe('Termo de busca (ex: Ifood, Uber, mercado)'),
+    months: z.number().min(1).max(12).default(3).describe('Quantos meses para trás buscar'),
+  })
+
+  const budgetSchema = z.object({})
+
   const result = streamText({
     model: google('gemini-flash-latest'),
     system: systemPrompt,
@@ -47,12 +59,9 @@ Regras:
     tools: {
       getTransactionsSummary: tool({
         description: 'Busca um resumo das transações do usuário para um mês/ano específico.',
-        parameters: z.object({
-          month: z.number().min(1).max(12).describe('Mês (1-12)'),
-          year: z.number().describe('Ano (ex: 2025)'),
-        }),
-        execute: async (params: { month: number; year: number }) => {
-          const { month, year } = params
+        parameters: summarySchema,
+        execute: async (args: z.infer<typeof summarySchema>) => {
+          const { month, year } = args
           const startDate = `${year}-${String(month).padStart(2, '0')}-01`
           const endDate = `${year}-${String(month).padStart(2, '0')}-31`
 
@@ -63,7 +72,15 @@ Regras:
             .lte('date', endDate)
 
           if (!transactions || transactions.length === 0) {
-            return { found: false, message: `Nenhuma transação encontrada para ${month}/${year}`, totalIncome: '0', totalExpense: '0', balance: '0', transactionCount: 0, topCategories: [] }
+            return {
+              found: false,
+              message: `Nenhuma transação encontrada para ${month}/${year}`,
+              totalIncome: '0',
+              totalExpense: '0',
+              balance: '0',
+              transactionCount: 0,
+              topCategories: [] as { name: string; total: string }[]
+            }
           }
 
           let totalIncome = 0
@@ -95,16 +112,13 @@ Regras:
             topCategories,
           }
         }
-      }),
+      } as any),
 
       searchTransactions: tool({
         description: 'Busca transações por descrição. Use quando o usuário perguntar sobre gastos com algo específico.',
-        parameters: z.object({
-          query: z.string().describe('Termo de busca (ex: Ifood, Uber, mercado)'),
-          months: z.number().min(1).max(12).default(3).describe('Quantos meses para trás buscar'),
-        }),
-        execute: async (params: { query: string; months: number }) => {
-          const { query, months } = params
+        parameters: searchSchema,
+        execute: async (args: z.infer<typeof searchSchema>) => {
+          const { query, months } = args
           const since = new Date()
           since.setMonth(since.getMonth() - months)
           const sinceStr = since.toISOString().split('T')[0]
@@ -118,7 +132,14 @@ Regras:
             .limit(50)
 
           if (!transactions || transactions.length === 0) {
-            return { found: false, query, months, transactionCount: 0, totalSpent: '0', recentTransactions: [] }
+            return {
+              found: false,
+              query,
+              months,
+              transactionCount: 0,
+              totalSpent: '0',
+              recentTransactions: [] as any[]
+            }
           }
 
           const total = transactions
@@ -140,12 +161,12 @@ Regras:
             }))
           }
         }
-      }),
+      } as any),
 
       getBudgetStatus: tool({
         description: 'Busca o status atual do orçamento do mês corrente.',
-        parameters: z.object({}),
-        execute: async () => {
+        parameters: budgetSchema,
+        execute: async (args: z.infer<typeof budgetSchema>) => {
           const now = new Date()
           const month = now.getMonth() + 1
           const year = now.getFullYear()
@@ -181,7 +202,7 @@ Regras:
             projectedMonthlyExpense: projectedExpense.toFixed(2),
           }
         }
-      }),
+      } as any),
     },
   })
 
