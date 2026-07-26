@@ -365,7 +365,7 @@ export function PlannedClient({
       if (val > 0) {
         let assignedColor = c.color || PALETTE[data.length % PALETTE.length]
         const isGenericDefault = assignedColor.toLowerCase() === '#ef4444' || assignedColor.toLowerCase() === '#10b981'
-        
+
         if (isGenericDefault || usedColors.has(assignedColor.toLowerCase())) {
           assignedColor = PALETTE[data.length % PALETTE.length]
         }
@@ -477,11 +477,12 @@ export function PlannedClient({
           type: 'pie',
           radius: ['48%', '78%'],
           center: ['50%', '50%'],
+          minAngle: 3,
           avoidLabelOverlap: false,
           itemStyle: {
             borderRadius: 6,
             borderColor: '#fff',
-            borderWidth: 2
+            borderWidth: 1
           },
           label: {
             show: true,
@@ -1249,36 +1250,7 @@ export function PlannedClient({
             </div>
           </div>
 
-          {/* Linha 2 de Gráficos: 3. Planejado vs Realizado & 4. Raio-X de Saúde */}
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 sm:gap-6">
-            {/* Gráfico 3: Planejado vs Realizado (Left 7 cols) */}
-            <div className="lg:col-span-7 glass-panel p-4 sm:p-6 rounded-2xl flex flex-col gap-3 overflow-hidden">
-              <div>
-                <h3 className="font-black text-slate-800 text-base sm:text-lg flex items-center gap-2">
-                  <BarChart3 className="w-4 h-4 sm:w-5 sm:h-5 text-emerald-600" />
-                  Planejado vs Realizado
-                </h3>
-                <p className="text-[11px] sm:text-xs text-slate-500">Comparação entre seu teto e o gasto real no ciclo</p>
-              </div>
-              <div className="h-72 sm:h-80 w-full pt-2">
-                <ReactECharts notMerge={true} lazyUpdate={true} option={barChartOption} style={{ height: '100%', width: '100%' }} />
-              </div>
-            </div>
-
-            {/* Gráfico 4: Raio-X de Saúde Financeira (Right 5 cols) */}
-            <div className="lg:col-span-5 glass-panel p-4 sm:p-6 rounded-2xl flex flex-col gap-3 overflow-hidden">
-              <div>
-                <h3 className="font-black text-slate-800 text-base sm:text-lg flex items-center gap-2">
-                  <span className="text-emerald-500">🕸️</span>
-                  Raio-X de Saúde Financeira
-                </h3>
-                <p className="text-[11px] sm:text-xs text-slate-500">Equilíbrio dos 4 pilares: Fixos, Variáveis, Aportes e Saldo Livre</p>
-              </div>
-              <div className="h-72 sm:h-80 w-full pt-2">
-                <ReactECharts notMerge={true} lazyUpdate={true} option={radarChartOption} style={{ height: '100%', width: '100%' }} />
-              </div>
-            </div>
-          </div>
+          {/* Fim da seção de gráficos */}
         </motion.div>
       )}
 
@@ -1372,8 +1344,8 @@ export function PlannedClient({
                           {bill.isRecurring && monthSpan > 1
                             ? `Recorrente (${monthSpan} meses)`
                             : bill.isRecurring
-                            ? 'Mensal Recorrente'
-                            : 'Custo Fixo Mensal'}
+                              ? 'Mensal Recorrente'
+                              : 'Custo Fixo Mensal'}
                         </span>
                       </div>
                     </div>
@@ -1903,11 +1875,10 @@ export function PlannedClient({
                             setEditingTx(t)
                             setIsTxModalOpen(true)
                           }}
-                          className={`p-2.5 rounded-xl border flex items-center justify-between gap-2 cursor-pointer transition-all active:scale-[0.99] ${
-                            isPaid
+                          className={`p-2.5 rounded-xl border flex items-center justify-between gap-2 cursor-pointer transition-all active:scale-[0.99] ${isPaid
                               ? 'bg-slate-50/70 border-slate-100 opacity-60'
                               : 'bg-white hover:bg-slate-50 border-slate-100 shadow-2xs'
-                          }`}
+                            }`}
                         >
                           <div className="flex items-center gap-2 min-w-0 flex-1">
                             <span className="text-sm shrink-0">{t.category?.icon || '💳'}</span>
@@ -1954,11 +1925,10 @@ export function PlannedClient({
                       setEditingTx(t)
                       setIsTxModalOpen(true)
                     }}
-                    className={`p-3 rounded-xl border flex items-center justify-between gap-3 cursor-pointer transition-all active:scale-[0.99] group ${
-                      isPaid
+                    className={`p-3 rounded-xl border flex items-center justify-between gap-3 cursor-pointer transition-all active:scale-[0.99] group ${isPaid
                         ? 'bg-slate-100/60 border-slate-200/50 opacity-65'
                         : 'bg-white hover:bg-slate-50 border-slate-200/80 shadow-2xs'
-                    }`}
+                      }`}
                   >
                     <div className="flex items-center gap-2.5 min-w-0 flex-1">
                       <span className="text-base shrink-0">{t.category?.icon || (t.type === 'expense' ? '💸' : '💰')}</span>

@@ -167,7 +167,7 @@ export function TransactionForm({
   initialData
 }: TransactionFormProps) {
   const formRef = useRef<HTMLFormElement>(null)
-  const actionToUse = initialData ? updateTransaction.bind(null, initialData.id) : createTransaction
+  const actionToUse = initialData?.id ? updateTransaction.bind(null, initialData.id) : createTransaction
   const [state, formAction, pending] = useActionState(actionToUse, initialState)
   
   const [type, setType] = useState<'expense' | 'income' | 'transfer'>(initialData?.type || defaultType)

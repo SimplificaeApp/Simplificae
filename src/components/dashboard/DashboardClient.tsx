@@ -377,7 +377,6 @@ export function DashboardClient({
 
     return Array.from(catMap.values())
       .sort((a, b) => b.value - a.value)
-      .slice(0, 6)
       .map((item, idx) => ({
         ...item,
         color: VIBRANT_PALETTE[idx % VIBRANT_PALETTE.length]
@@ -528,7 +527,7 @@ export function DashboardClient({
     legend: { type: 'scroll', orient: 'horizontal', bottom: 0, textStyle: { color: '#64748b', fontSize: 11, fontFamily: 'inherit' }, icon: 'circle', itemWidth: 8, itemHeight: 8 },
     series: [{
       type: 'pie', radius: ['48%', '72%'], center: ['50%', '44%'],
-      padAngle: 4, itemStyle: { borderRadius: 6 },
+      padAngle: 2, minAngle: 3, itemStyle: { borderRadius: 6 },
       label: { show: false },
       emphasis: { scale: true, scaleSize: 8, itemStyle: { shadowBlur: 16, shadowOffsetY: 6, shadowColor: 'rgba(0,0,0,0.15)' } },
       data: donutData.map((d) => ({ name: d.name, icon: d.icon, value: d.value, itemStyle: { color: d.color } })),
@@ -556,7 +555,7 @@ export function DashboardClient({
     legend: { type: 'scroll', orient: 'horizontal', bottom: 0, textStyle: { color: '#64748b', fontSize: 11, fontFamily: 'inherit' }, icon: 'circle', itemWidth: 8, itemHeight: 8 },
     series: [{
       type: 'pie', radius: ['48%', '72%'], center: ['50%', '44%'],
-      padAngle: 4, itemStyle: { borderRadius: 6 },
+      padAngle: 2, minAngle: 3, itemStyle: { borderRadius: 6 },
       label: { show: false },
       emphasis: { scale: true, scaleSize: 8, itemStyle: { shadowBlur: 16, shadowOffsetY: 6, shadowColor: 'rgba(0,0,0,0.15)' } },
       data: accountDistributionData.map((d, i) => ({ name: d.name, value: d.value, itemStyle: { color: d.color || DONUT_COLORS[i % DONUT_COLORS.length] } })),
@@ -846,18 +845,16 @@ export function DashboardClient({
                 <button
                   type="button"
                   onClick={() => setActiveChartTab('fluxo')}
-                  className={`px-3 py-1.5 rounded-lg transition-all ${
-                    activeChartTab === 'fluxo' ? 'bg-white text-emerald-700 shadow-xs' : 'text-slate-500 hover:text-slate-800'
-                  }`}
+                  className={`px-3 py-1.5 rounded-lg transition-all ${activeChartTab === 'fluxo' ? 'bg-white text-emerald-700 shadow-xs' : 'text-slate-500 hover:text-slate-800'
+                    }`}
                 >
                   Fluxo Diário
                 </button>
                 <button
                   type="button"
                   onClick={() => setActiveChartTab('macro')}
-                  className={`px-3 py-1.5 rounded-lg transition-all ${
-                    activeChartTab === 'macro' ? 'bg-white text-emerald-700 shadow-xs' : 'text-slate-500 hover:text-slate-800'
-                  }`}
+                  className={`px-3 py-1.5 rounded-lg transition-all ${activeChartTab === 'macro' ? 'bg-white text-emerald-700 shadow-xs' : 'text-slate-500 hover:text-slate-800'
+                    }`}
                 >
                   6 Meses
                 </button>
@@ -890,8 +887,8 @@ export function DashboardClient({
                   <ReactECharts notMerge={true} lazyUpdate={true} option={donutExpenseOption} onEvents={chartEvents} style={{ height: '100%', width: '100%' }} />
                 </div>
 
-                <div className="flex flex-col gap-2 pt-2 border-t border-slate-100">
-                  {donutData.slice(0, 4).map((d, i) => {
+                <div className="flex flex-col gap-2 pt-2 border-t border-slate-100 max-h-52 overflow-y-auto pr-1 custom-scrollbar">
+                  {donutData.map((d, i) => {
                     const pct = totalExpenses > 0 ? Math.round((d.value / totalExpenses) * 100) : 0;
                     return (
                       <div
@@ -1008,13 +1005,12 @@ export function DashboardClient({
                   >
                     <div className="flex items-center gap-3 min-w-0">
                       <div
-                        className={`w-9 h-9 rounded-xl flex items-center justify-center text-base shrink-0 ${
-                          isTransfer
-                            ? "bg-blue-50 text-blue-600"
-                            : isIncome
+                        className={`w-9 h-9 rounded-xl flex items-center justify-center text-base shrink-0 ${isTransfer
+                          ? "bg-blue-50 text-blue-600"
+                          : isIncome
                             ? "bg-emerald-50 text-emerald-600"
                             : "bg-rose-50 text-rose-600"
-                        }`}
+                          }`}
                       >
                         {t.category?.icon ? (
                           <span className="text-base">{t.category.icon}</span>
@@ -1040,13 +1036,12 @@ export function DashboardClient({
                       </div>
                     </div>
                     <div
-                      className={`font-black text-xs sm:text-sm tabular-nums shrink-0 ${
-                        isTransfer
-                          ? "text-blue-600"
-                          : isIncome
+                      className={`font-black text-xs sm:text-sm tabular-nums shrink-0 ${isTransfer
+                        ? "text-blue-600"
+                        : isIncome
                           ? "text-emerald-600"
                           : "text-rose-600"
-                      } ${globalBlur && !isUnlocked ? 'blur-xs select-none' : ''}`}
+                        } ${globalBlur && !isUnlocked ? 'blur-xs select-none' : ''}`}
                     >
                       {globalBlur && !isUnlocked ? '••••' : `${isIncome ? "+" : isTransfer ? "" : "-"} ${currencyFmt.format(Number(t.amount))}`}
                     </div>
