@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { LayoutDashboard, ArrowRightLeft, BarChart3, Settings, LogOut, CalendarDays, Wallet, CreditCard, PiggyBank } from "lucide-react";
+import { LayoutDashboard, ArrowRightLeft, BarChart3, Settings, LogOut, CalendarDays, Wallet, CreditCard, PiggyBank, Sparkles } from "lucide-react";
 import { logout } from "@/app/(auth)/actions";
 import { useTransition } from "react";
 
@@ -27,6 +27,7 @@ export function Sidebar() {
     { href: '/planned', icon: CalendarDays, label: 'Planejamento' },
     { href: '/credit-cards', icon: CreditCard, label: 'Cartões' },
     { href: '/accounts', icon: Wallet, label: 'Contas' },
+    { href: '/assistant', icon: Sparkles, label: 'Assistente IA', ai: true },
   ]
 
   return (
@@ -61,10 +62,15 @@ export function Sidebar() {
           <Link
             key={item.href}
             href={item.href}
-            className={`sidebar-link ${isActive(item.href) ? 'active' : ''}`}
+            className={`sidebar-link ${isActive(item.href) ? 'active' : ''} ${
+              (item as any).ai ? 'mt-3 border border-indigo-100 bg-gradient-to-r from-indigo-50 to-purple-50 hover:from-indigo-100 hover:to-purple-100 !text-indigo-700' : ''
+            }`}
           >
             <item.icon className="w-4 h-4 shrink-0" strokeWidth={isActive(item.href) ? 2.5 : 2} />
             <span>{item.label}</span>
+            {(item as any).ai && !isActive(item.href) && (
+              <span className="ml-auto text-[9px] font-black uppercase tracking-widest bg-indigo-500 text-white px-1.5 py-0.5 rounded-full">IA</span>
+            )}
             {isActive(item.href) && (
               <span className="ml-auto w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0" />
             )}

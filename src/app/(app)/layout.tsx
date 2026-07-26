@@ -2,6 +2,7 @@ import { createClient } from '@/lib/supabase/server'
 import { Sidebar } from "@/components/layout/Sidebar"
 import { Header } from "@/components/layout/Header"
 import { PrivacyProvider } from "@/components/providers/PrivacyProvider"
+import { AiAssistantWrapper } from "@/components/layout/AiAssistantWrapper"
 import { redirect } from 'next/navigation'
 
 export default async function AppLayout({
@@ -27,6 +28,7 @@ export default async function AppLayout({
         <div className="flex-1 flex flex-col h-screen overflow-y-auto relative">
           <Header workspaces={workspaces || []} user={user} />
           {children}
+          <AiAssistantWrapper />
         </div>
       </div>
     </PrivacyProvider>

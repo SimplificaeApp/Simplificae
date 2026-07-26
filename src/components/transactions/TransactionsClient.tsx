@@ -6,7 +6,7 @@ import {
   Plus, Search, TrendingUp, TrendingDown, ArrowRightLeft,
   Trash2, CalendarDays, ChevronLeft, ChevronRight, EyeOff,
   CreditCard, ChevronDown, ChevronUp, CheckCircle2, Edit2, RotateCcw,
-  Sparkles, Layers
+  Layers
 } from 'lucide-react'
 import { Modal } from '@/components/ui/Modal'
 import { CustomSelect } from '@/components/ui/CustomSelect'
@@ -288,7 +288,6 @@ export function TransactionsClient({
   const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth())
   const [selectedYear, setSelectedYear] = useState(new Date().getFullYear())
   const [isPending, startTransition] = useTransition()
-
   const processedItems = useMemo(() => {
     const itemsByDate: Record<string, Transaction[]> = {}
     const invoicesByCard: Record<string, { account: Account; total: number; transactions: Transaction[] }> = {}

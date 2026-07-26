@@ -1,7 +1,7 @@
 'use client'
 
 import { usePathname } from "next/navigation";
-import { LogOut, LayoutDashboard, ArrowRightLeft, CalendarDays, Wallet, CreditCard, BarChart3, Settings, Menu, X, PiggyBank } from "lucide-react";
+import { LogOut, LayoutDashboard, ArrowRightLeft, CalendarDays, Wallet, CreditCard, Settings, Menu, X, PiggyBank, Sparkles } from "lucide-react";
 import { logout } from "@/app/(auth)/actions";
 import { useTransition, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
@@ -14,6 +14,7 @@ const PAGE_LABELS: Record<string, { label: string; icon: any }> = {
   '/accounts': { label: 'Contas', icon: Wallet },
   '/credit-cards': { label: 'Cartões', icon: CreditCard },
   '/settings': { label: 'Configurações', icon: Settings },
+  '/assistant': { label: 'Assistente IA', icon: Sparkles },
 }
 
 const navItems = [
@@ -22,6 +23,7 @@ const navItems = [
   { href: '/planned', icon: CalendarDays, label: 'Planejamento' },
   { href: '/credit-cards', icon: CreditCard, label: 'Cartões' },
   { href: '/accounts', icon: Wallet, label: 'Contas' },
+  { href: '/assistant', icon: Sparkles, label: 'Assistente IA' },
 ]
 
 export function Header({ workspaces = [], user }: { workspaces?: any[], user?: any }) {
