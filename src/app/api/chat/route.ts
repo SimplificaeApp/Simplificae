@@ -1,5 +1,5 @@
-﻿import { google } from '@ai-sdk/google'
-import { streamText, generateText, tool } from 'ai'
+import { google } from '@ai-sdk/google'
+import { streamText, tool } from 'ai'
 import { createClient } from '@/lib/supabase/server'
 import { z } from 'zod'
 
@@ -13,101 +13,8 @@ function fmtBRL(n: number) {
   return n.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
 }
 
-// ─── Selecao de ferramenta baseada em keywords (evita falha do modelo) ─────
-function pickTool(question: string): string {
-  const q = question.toLowerCase()
-    .normalize('NFD').replace(/[\u0300-\u036f]/g, '') // remove acentos
-
-  // Contas futuras / proximas
-  if (/proxim|venc|conta prevista|agend|programad|futur|quando pago|pagar|devo pagar/.test(q)) return 'getUpcomingBills'
-
-  // Categorias especificas
-  const categoryWords = [
-    'alimenta','comida','restaurante','lanche','ifood','refeic',
-    'transporte','uber','gasolina','combustivel','onibus','metro','pedagio',
-    'moradia','aluguel','condomin','luz','agua','energia','internet','gas',
-    'saude','medico','farmacia','remedio','academia','plano de saude',
-    'educacao','escola','faculdade','curso','mensalidade',
-    'lazer','entretenimento','netflix','spotify','viagem','hotel','cinema',
-    'vestuario','roupa','calcado','vestuario',
-    'mercado','supermercado','compras',
-    'categoria','gasto com','gastei com','quanto em',
-  ]
-  if (categoryWords.some(w => q.includes(w))) return 'getCategorySpending'
-
-  // Busca por nome especifico
-  if (/buscar|procurar|encontrar|historico de/.test(q)) return 'searchTransactions'
-
-  // Status / orcamento atual
-  if (/status|orcamento|ja gastei|quanto gastei ate|projecao|ate o fim|pendente|confirmad/.test(q)) return 'getBudgetStatus'
-
-  // Resumo mensal (padrao)
-  return 'getTransactionsSummary'
-}
-
-// Extrai o nome da categoria da pergunta
-function extractCategory(question: string): string {
-  const q = question.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
-  const map: Record<string, string> = {
-    'alimenta': 'Alimentação', 'comida': 'Alimentação', 'ifood': 'Alimentação', 'restaurante': 'Alimentação', 'refeic': 'Alimentação',
-    'transporte': 'Transporte', 'uber': 'Transporte', 'gasolina': 'Transporte', 'combustivel': 'Transporte',
-    'moradia': 'Moradia', 'aluguel': 'Moradia', 'condomin': 'Moradia',
-    'saude': 'Saúde', 'medico': 'Saúde', 'farmacia': 'Saúde',
-    'educacao': 'Educação', 'escola': 'Educação', 'faculdade': 'Educação',
-    'lazer': 'Lazer', 'netflix': 'Lazer', 'cinema': 'Lazer',
-    'mercado': 'Mercado', 'supermercado': 'Mercado',
-    'vestuario': 'Vestuário', 'roupa': 'Vestuário',
-    'viagem': 'Viagem', 'hotel': 'Viagem',
-  }
-  for (const [key, cat] of Object.entries(map)) {
-    if (q.includes(key)) return cat
-  }
-  // Tenta extrair palavra apos "em " ou "com "
-  const match = q.match(/(?:gasto(?:i)? (?:com|em)|em|com) ([a-z]+)/)
-  if (match) return match[1].charAt(0).toUpperCase() + match[1].slice(1)
-  return ''
-}
-
-// Extrai mes da pergunta
-function extractMonth(question: string, currentMonth: number, currentYear: number): { month: number, year: number } {
-  const q = question.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
-  const monthNames: Record<string, number> = {
-    'janeiro':1,'fevereiro':2,'marco':3,'abril':4,'maio':5,'junho':6,
-    'julho':7,'agosto':8,'setembro':9,'outubro':10,'novembro':11,'dezembro':12
-  }
-  for (const [name, num] of Object.entries(monthNames)) {
-    if (q.includes(name)) return { month: num, year: currentYear }
-  }
-  if (q.includes('proximo mes') || q.includes('mes que vem')) {
-    const nm = currentMonth === 12 ? 1 : currentMonth + 1
-    return { month: nm, year: currentMonth === 12 ? currentYear + 1 : currentYear }
-  }
-  if (q.includes('mes passado') || q.includes('mes anterior')) {
-    const pm = currentMonth === 1 ? 12 : currentMonth - 1
-    return { month: pm, year: currentMonth === 1 ? currentYear - 1 : currentYear }
-  }
-  return { month: currentMonth, year: currentYear }
-}
-
-async function generateInsight(userQuestion: string, contextData: string): Promise<string> {
-  try {
-    const { text } = await generateText({
-      model: google('gemini-3.5-flash-lite'),
-      system: `Voce e o FinanceOS AI, assistente financeiro pessoal. Responde em portugues do Brasil.
-Seja natural e direto. Responda SO o que foi perguntado.
-Seja conciso: 2-3 paragrafos no maximo.
-Use **negrito** para valores importantes.
-Nao use secoes numeradas nem titulos com #.
-Se nao souber algo com certeza, diga honestamente.`,
-      prompt: `Pergunta: "${userQuestion}"
-Dados: ${contextData}
-Responda diretamente a pergunta.`,
-    } as any)
-    return text || ''
-  } catch (err) {
-    console.error('[CHAT API] generateInsight error:', err)
-    return ''
-  }
+function norm(str: string) {
+  return (str || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim()
 }
 
 export async function POST(req: Request) {
@@ -115,272 +22,547 @@ export async function POST(req: Request) {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return new Response('Unauthorized', { status: 401 })
 
-  const { messages } = await req.json()
+  const body = await req.json().catch(() => ({}))
+  const rawMessages: any[] = Array.isArray(body) ? body : (Array.isArray(body?.messages) ? body.messages : [])
+
+  const lastUserMsg = [...rawMessages].reverse().find((m: any) => m.role === 'user')
+  const lastUserText = typeof lastUserMsg?.content === 'string'
+    ? lastUserMsg.content
+    : (Array.isArray(lastUserMsg?.parts) ? lastUserMsg.parts.filter((p: any) => p.type === 'text').map((p: any) => p.text || '').join('') : '')
+
+  const promptNorm = norm(lastUserText)
+
+  // 1. Carrega Contexto Global do Usuário
+  const { data: categoriesData } = await supabase.from('categories').select('id, name, type, is_fixed, is_investment, budget_amount')
+  const { data: accountsData } = await supabase.from('accounts').select('id, name, type, initial_balance')
+  const { data: vaultsData } = await supabase.from('account_vaults').select('id, name, balance')
+
+  const categoryIdToNameMap: Record<string, { name: string; isInvestment: boolean; isFixed: boolean }> = {}
+  if (categoriesData) {
+    for (const c of categoriesData as any[]) {
+      categoryIdToNameMap[c.id] = { name: c.name, isInvestment: !!c.is_investment, isFixed: !!c.is_fixed }
+    }
+  }
+
+  const accountIdMap: Record<string, { id: string; name: string; type: string }> = {}
+  if (accountsData) {
+    for (const a of accountsData as any[]) {
+      accountIdMap[a.id] = { id: a.id, name: a.name, type: a.type }
+    }
+  }
+
+  const categoryResolver = (t: any): string => {
+    if (t.category_id && categoryIdToNameMap[t.category_id]) return categoryIdToNameMap[t.category_id].name
+    if (typeof t.category === 'string') return t.category
+    if (Array.isArray(t.category) && t.category.length > 0) return t.category[0]?.name || 'Outros'
+    if (typeof t.category === 'object' && t.category?.name) return t.category.name
+    return 'Outros'
+  }
+
+  const accountResolver = (t: any): { name: string; type: string; isCreditCard: boolean } => {
+    const accObj = t.account_id ? accountIdMap[t.account_id] : null
+    if (accObj) {
+      return { name: accObj.name, type: accObj.type, isCreditCard: accObj.type === 'credit_card' }
+    }
+    const name = typeof t.account === 'string' ? t.account : (t.account?.name || '')
+    const type = t.account?.type || ''
+    return { name, type, isCreditCard: type === 'credit_card' }
+  }
+
+  const categoriesList = (categoriesData || []).map((c: any) => c.name).filter(Boolean)
+  const bankAccounts = (accountsData || []).filter((a: any) => a.type !== 'credit_card')
+  const creditCards = (accountsData || []).filter((a: any) => a.type === 'credit_card')
+  
+  const bankAccountsStr = bankAccounts.map((a: any) => `${a.name} (Conta)`).join(', ')
+  const creditCardsStr = creditCards.map((a: any) => `${a.name} (Cartão de Crédito)`).join(', ')
+  const accountsList = (accountsData || []).map((a: any) => a.name).filter(Boolean)
+  const vaultsList = (vaultsData || []).map((v: any) => `${v.name}: ${fmtBRL(Number(v.balance) || 0)}`)
+
+  // Memória de Contexto Multiturno (Categoria, Conta, Mês)
+  let previousCategoryContext: string | null = null
+  let previousAccountContext: string | null = null
+  let previousMonthContext: number | null = null
+
+  const aiMessages: any[] = []
+  for (const m of rawMessages) {
+    if (m.role === 'user') {
+      const text = typeof m.content === 'string'
+        ? m.content
+        : (Array.isArray(m.parts) ? m.parts.filter((p: any) => p.type === 'text').map((p: any) => p.text || '').join('') : '')
+      
+      if (text.trim()) {
+        aiMessages.push({ role: 'user', content: text })
+        const mNorm = norm(text)
+        for (const cName of categoriesList) {
+          if (mNorm.includes(norm(cName))) {
+            previousCategoryContext = cName
+            break
+          }
+        }
+        for (const aName of accountsList) {
+          if (mNorm.includes(norm(aName))) {
+            previousAccountContext = aName
+            break
+          }
+        }
+        if (mNorm.includes('agosto')) previousMonthContext = 8
+        if (mNorm.includes('julho')) previousMonthContext = 7
+        if (mNorm.includes('setembro')) previousMonthContext = 9
+      }
+    } else if (m.role === 'assistant') {
+      const parts = Array.isArray(m.parts) ? m.parts : []
+      const textStr = parts.filter((p: any) => p.type === 'text').map((p: any) => p.text || p.textDelta || '').join('')
+      const toolInsightStr = parts
+        .filter((p: any) => p.type === 'tool-invocation' || p.toolInvocation)
+        .map((p: any) => {
+          const inv = p.toolInvocation || p
+          const res = inv.result || inv.output || p.result || p.output
+          if (res && typeof res === 'object' && res.insight) return res.insight
+          return ''
+        })
+        .filter(Boolean)
+        .join('\n')
+
+      const finalContent = textStr || toolInsightStr || (typeof m.content === 'string' ? m.content : '') || 'OK.'
+      aiMessages.push({ role: 'assistant', content: finalContent })
+    }
+  }
+
   const now = new Date()
   const today = now.toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })
   const currentMonth = now.getMonth() + 1
   const currentYear = now.getFullYear()
 
-  // Pega ultima mensagem do usuario
-  const lastUserMsg = [...(messages || [])].reverse().find((m: any) => m.role === 'user')
-  const userQuestion = lastUserMsg?.content ||
-    (Array.isArray(lastUserMsg?.parts) ? lastUserMsg.parts.map((p: any) => p.text || '').join('') : '') || ''
+  const systemPrompt = `Você é o assistente pessoal de inteligência financeira da plataforma Simplificae.
+Hoje é ${today}. O mês de referência atual é ${currentMonth}/${currentYear} (${fmtMonth(currentMonth, currentYear)}).
 
-  const aiMessages: any[] = (messages || []).map((m: any) => {
-    if (m.role === 'user') {
-      const text = m.content || (Array.isArray(m.parts) ? m.parts.filter((p: any) => p.type === 'text').map((p: any) => p.text || '').join('') : '')
-      return { role: 'user', content: text || '' }
-    }
-    if (m.role === 'assistant') {
-      const parts = Array.isArray(m.parts) ? m.parts : []
-      const text = parts.filter((p: any) => p.type === 'text').map((p: any) => p.text || '').join('')
-      const contentStr = text || (typeof m.content === 'string' ? m.content : '')
-      if (!contentStr.trim()) return null
-      return { role: 'assistant', content: contentStr }
-    }
-    return null
-  }).filter(Boolean)
+SEU CONTEXTO FINANCEIRO:
+- Contas Bancárias (Débito/Líquido): ${bankAccountsStr || 'Nenhuma'}
+- Cartões de Crédito (Fatura): ${creditCardsStr || 'Nenhum'}
+- Categorias cadastradas: ${categoriesList.join(', ')}
+- Cofres e Investimentos: ${vaultsList.length > 0 ? vaultsList.join(', ') : 'Nenhum'}
 
-  const systemPrompt = `Voce e o FinanceOS AI. Hoje e ${today}. Mes atual: ${currentMonth}/${currentYear}.
-Responda em portugues do Brasil. Use as ferramentas disponíveis para buscar dados reais.`
+REGRAS OBRIGATÓRIAS:
+1. SEMPRE FORNEÇA RESPOSTAS EM TEXTO RICAS E COMPLETAS:
+   - Nunca responda em branco. Sempre comente os números, forneça análises e explicações claras.
+
+2. QUANDO O USUÁRIO PERGUNTAR POR INVESTIMENTOS ("quanto investi", "quanto guardei", "cofres"):
+   - Busque as transações de categorias de investimento (ex: Renda Fixa) ou aportes em cofres.
+
+3. CONTINUIDADE DE PERÍODO E PERGUNTAS DE DETALHAMENTO ("detalha melhor", "o que seriam esses"):
+   - Se o usuário perguntou sobre agosto ou sobre uma categoria específica, mantenha esse contexto e explique detalhadamente em formato Markdown com marcadores.`
 
   try {
-    const selectedTool = pickTool(userQuestion)
-    const { month: qMonth, year: qYear } = extractMonth(userQuestion, currentMonth, currentYear)
-
     const result = streamText({
       model: google('gemini-3.5-flash-lite'),
       system: systemPrompt,
       messages: aiMessages,
-      maxSteps: 3,
+      maxSteps: 5,
       tools: {
-        getTransactionsSummary: tool({
-          description: 'Busca resumo mensal: receitas, despesas, saldo e principais categorias. Use para perguntas gerais sobre o mes.',
+        // ─── 1. Resumo Financeiro Geral do Mês ─────────────────────────────
+        getFinancialSummary: tool({
+          description: 'Obtem o resumo financeiro do mes (total de receitas, total de despesas, saldo e principais categorias).',
           parameters: z.object({
             month: z.number().min(1).max(12).optional(),
             year: z.number().optional(),
+            excludeCategory: z.string().optional(),
           }),
           execute: async (args: any) => {
-            const month = args.month ?? qMonth
-            const year = args.year ?? qYear
-            const daysInMonth = new Date(year, month, 0).getDate()
-            const startDate = `${year}-${String(month).padStart(2,'0')}-01`
-            const endDate = `${year}-${String(month).padStart(2,'0')}-${String(daysInMonth).padStart(2,'0')}`
+            const m = args.month ?? previousMonthContext ?? currentMonth
+            const y = args.year ?? currentYear
+            const daysInMonth = new Date(y, m, 0).getDate()
+            const startDate = `${y}-${String(m).padStart(2,'0')}-01`
+            const endDate = `${y}-${String(m).padStart(2,'0')}-${String(daysInMonth).padStart(2,'0')}`
 
-            const { data: txs, error } = await supabase
-              .from('transactions').select('amount, type, date, ignore_in_cashflow, category:categories(name)')
+            const excludeQuery = args.excludeCategory ? norm(args.excludeCategory) : null
+
+            const { data: txs } = await supabase
+              .from('transactions')
+              .select('id, category_id, account_id, description, amount, type, date, ignore_in_cashflow')
               .gte('date', startDate).lte('date', endDate)
 
-            if (error) return { found: false, error: error.message, insight: 'Erro ao buscar dados.', showCard: false }
-            if (!txs || txs.length === 0) return { found: false, period: fmtMonth(month, year), totalIncome: 0, totalExpense: 0, balance: 0, transactionCount: 0, topCategories: [], insight: `Nao encontrei lancamentos para ${fmtMonth(month, year)}.`, showCard: false }
+            if (!txs) return { found: false, period: fmtMonth(m, y), insight: `Sem lançamentos registrados em ${fmtMonth(m, y)}.`, showCard: false }
 
-            let totalIncome = 0, totalExpense = 0
-            const cats: Record<string, number> = {}
-            const allTx: any[] = []
+            let totalIncome = 0
+            let totalExpense = 0
+            let excludedTotal = 0
+            const catMap: Record<string, number> = {}
+
             for (const t of txs as any[]) {
-              if (t.ignore_in_cashflow) continue
-              if (t.type === 'income') totalIncome += Number(t.amount)
+              if (t.ignore_in_cashflow || t.type === 'transfer') continue
+              const cname = categoryResolver(t)
+              const cnameNorm = norm(cname)
+              const descNorm = norm(t.description || '')
+
+              if (descNorm.includes('ajuste manual') || descNorm.includes('aporte no cofrinho')) continue
+
+              if (excludeQuery && (cnameNorm.includes(excludeQuery) || descNorm.includes(excludeQuery))) {
+                if (t.type === 'expense') excludedTotal += Number(t.amount)
+                continue
+              }
+
+              const amt = Number(t.amount) || 0
+              if (t.type === 'income') totalIncome += amt
               if (t.type === 'expense') {
-                totalExpense += Number(t.amount)
-                const cn = t.category?.name || 'Sem categoria'
-                cats[cn] = (cats[cn] || 0) + Number(t.amount)
-                allTx.push(t)
+                totalExpense += amt
+                catMap[cname] = (catMap[cname] || 0) + amt
               }
             }
 
-            const topCategories = Object.entries(cats).sort(([,a],[,b])=>b-a).slice(0,6).map(([name,total])=>({name,total:Number(total.toFixed(2))}))
             const balance = totalIncome - totalExpense
+            const topCategories = Object.entries(catMap)
+              .sort(([, a], [, b]) => b - a)
+              .map(([name, total]) => ({ name, total: Number(total.toFixed(2)) }))
 
-            // Verifica se a pergunta e sobre um subconjunto (ex: desconsiderando X)
-            const qLower = userQuestion.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
-            let contextNote = ''
-            if (/desconsiderando|sem considerar|excluindo|tirando/.test(qLower)) {
-              // Tenta encontrar o que excluir
-              const excludeMatch = qLower.match(/desconsiderando|sem considerar|excluindo|tirando\s+([^,]+)/)
-              const excludeCat = topCategories.find(c => {
-                const cn = c.name.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
-                return qLower.includes(cn.split(' ')[0])
-              })
-              if (excludeCat) {
-                const adjustedExpense = totalExpense - excludeCat.total
-                const adjustedBalance = totalIncome - adjustedExpense
-                contextNote = `\nSe desconsiderar "${excludeCat.name}" (${fmtBRL(excludeCat.total)}): despesas seriam ${fmtBRL(adjustedExpense)}, saldo seria ${fmtBRL(adjustedBalance)}`
-              }
+            const balanceStr = balance >= 0 ? `saldo positivo de **${fmtBRL(balance)}**` : `déficit de **${fmtBRL(Math.abs(balance))}**`
+            const excludeNote = excludeQuery && excludedTotal > 0 ? ` (desconsiderando a categoria **${args.excludeCategory}** de **${fmtBRL(excludedTotal)}**)` : ''
+            
+            const insight = `Em **${fmtMonth(m, y)}**${excludeNote}, você registrou **${fmtBRL(totalIncome)}** em receitas e **${fmtBRL(totalExpense)}** em despesas consideradas, resultando em um ${balanceStr}.`
+
+            return {
+              cardType: 'summary',
+              found: true,
+              period: fmtMonth(m, y),
+              totalIncome: Number(totalIncome.toFixed(2)),
+              totalExpense: Number(totalExpense.toFixed(2)),
+              balance: Number(balance.toFixed(2)),
+              excludedTotal: Number(excludedTotal.toFixed(2)),
+              transactionCount: txs.length,
+              topCategories,
+              insight,
+              showCard: true
             }
-
-            const context = `${fmtMonth(month, year)}: Receitas ${fmtBRL(totalIncome)} | Despesas ${fmtBRL(totalExpense)} | Saldo ${fmtBRL(balance)}
-Categorias: ${topCategories.slice(0,5).map(c=>`${c.name} ${fmtBRL(c.total)} (${Math.round((c.total/totalExpense)*100)}%)`).join(' | ')}${contextNote}`
-
-            const insight = await generateInsight(userQuestion, context)
-
-            return { found: true, period: fmtMonth(month, year), totalIncome: Number(totalIncome.toFixed(2)), totalExpense: Number(totalExpense.toFixed(2)), balance: Number(balance.toFixed(2)), transactionCount: txs.length, topCategories, insight, showCard: true }
           }
         } as any),
 
-        getCategorySpending: tool({
-          description: 'Busca gastos de uma categoria especifica como Alimentacao, Transporte, Moradia, Mercado, Lazer, Saude, Educacao.',
+        // ─── 2. Transações e Buscas Específicas ─────────────────────────────
+        getTransactions: tool({
+          description: 'Busca lancamentos e transacoes filtrados por mês, ano, categoria, conta ou investimentos.',
           parameters: z.object({
-            categoryName: z.string().describe('Nome da categoria'),
+            month: z.number().min(1).max(12).optional(),
+            year: z.number().optional(),
+            categoryName: z.string().optional(),
+            accountName: z.string().optional(),
+            keyword: z.string().optional(),
+            isInvestment: z.boolean().optional().describe('Defina como true quando a pergunta for sobre investimentos, cofres, aportes ou reserva'),
+            onlyCreditCards: z.boolean().optional(),
+            onlyBankAccounts: z.boolean().optional(),
+          }),
+          execute: async (args: any) => {
+            const m = args.month ?? previousMonthContext ?? currentMonth
+            const y = args.year ?? currentYear
+            const daysInMonth = new Date(y, m, 0).getDate()
+            const startDate = `${y}-${String(m).padStart(2,'0')}-01`
+            const endDate = `${y}-${String(m).padStart(2,'0')}-${String(daysInMonth).padStart(2,'0')}`
+
+            const { data: allTxs } = await supabase
+              .from('transactions')
+              .select('id, category_id, account_id, description, amount, type, date, status, ignore_in_cashflow')
+              .gte('date', startDate).lte('date', endDate)
+              .order('date', { ascending: false })
+
+            let txs = allTxs || []
+
+            // A) Filtro de Segurança do Fluxo de Caixa
+            txs = txs.filter((t: any) => {
+              if (t.ignore_in_cashflow) return false
+              if (t.type === 'transfer') return false
+              const descNorm = norm(t.description || '')
+              if (descNorm.includes('ajuste manual')) return false
+              return true
+            })
+
+            // Detecta intenção de investimento caso não passada nos argumentos
+            const isInvestIntent = args.isInvestment || promptNorm.includes('investi') || promptNorm.includes('investimento') || promptNorm.includes('guardei') || promptNorm.includes('cofre') || promptNorm.includes('reserva')
+
+            // B) Filtro por Investimentos
+            if (isInvestIntent) {
+              txs = txs.filter((t: any) => {
+                const catObj = t.category_id ? categoryIdToNameMap[t.category_id] : null
+                const descNorm = norm(t.description || '')
+                const cnameNorm = catObj ? norm(catObj.name) : ''
+                return catObj?.isInvestment || cnameNorm.includes('renda fixa') || cnameNorm.includes('investimento') || descNorm.includes('aporte') || descNorm.includes('investimento') || descNorm.includes('reserva') || descNorm.includes('cofre')
+              })
+            } else {
+              // Filtro normal por Categoria
+              let targetCatName = args.categoryName || null
+              if (!targetCatName) {
+                for (const cName of categoriesList) {
+                  const cNorm = norm(cName)
+                  if (promptNorm.includes(cNorm) || cNorm.includes(promptNorm)) {
+                    targetCatName = cName
+                    break
+                  }
+                }
+              }
+              if (!targetCatName && previousCategoryContext && (promptNorm.includes('essas') || promptNorm.includes('esses') || promptNorm.includes('quais') || promptNorm.includes('detalha') || promptNorm.includes('outras despesas'))) {
+                targetCatName = previousCategoryContext
+              }
+
+              if (targetCatName) {
+                const catNorm = norm(targetCatName)
+                txs = txs.filter((t: any) => {
+                  const cname = norm(categoryResolver(t))
+                  const desc = norm(t.description || '')
+                  return cname.includes(catNorm) || catNorm.includes(cname) || desc.includes(catNorm)
+                })
+              }
+
+              if (args.keyword) {
+                const kwNorm = norm(args.keyword)
+                txs = txs.filter((t: any) => {
+                  const desc = norm(t.description || '')
+                  const cname = norm(categoryResolver(t))
+                  return desc.includes(kwNorm) || cname.includes(kwNorm)
+                })
+              }
+            }
+
+            if (args.accountName) {
+              const accNorm = norm(args.accountName)
+              txs = txs.filter((t: any) => {
+                const aname = norm(accountResolver(t).name)
+                return aname.includes(accNorm) || accNorm.includes(aname)
+              })
+            }
+
+            let totalIncome = 0
+            let totalExpense = 0
+
+            for (const t of txs as any[]) {
+              const amt = Number(t.amount) || 0
+              if (t.type === 'income') totalIncome += amt
+              if (t.type === 'expense') totalExpense += amt
+            }
+
+            let insight = ''
+            if (txs.length === 0) {
+              insight = isInvestIntent 
+                ? `Nenhum investimento ou aporte registrado em **${fmtMonth(m, y)}**.`
+                : `Nenhum lançamento localizado em **${fmtMonth(m, y)}**.`
+            } else if (isInvestIntent) {
+              insight = `Em **${fmtMonth(m, y)}**, você investiu/aportou um total de **${fmtBRL(totalExpense > 0 ? totalExpense : totalIncome)}**, distribuídos em **${txs.length} lançamento(s)**.`
+            } else {
+              const label = args.categoryName || previousCategoryContext || 'pesquisa'
+              insight = `Em **${fmtMonth(m, y)}**, você registrou **${fmtBRL(totalExpense > 0 ? totalExpense : totalIncome)}** (${label}), distribuídos em **${txs.length} lançamento(s)**.`
+            }
+
+            return {
+              cardType: 'search',
+              found: txs.length > 0,
+              period: fmtMonth(m, y),
+              categoryFilter: args.categoryName || (isInvestIntent ? 'Investimentos' : undefined),
+              accountFilter: args.accountName,
+              totalIncome: Number(totalIncome.toFixed(2)),
+              totalExpense: Number(totalExpense.toFixed(2)),
+              transactionCount: txs.length,
+              transactions: txs.map((t: any) => {
+                const accInfo = accountResolver(t)
+                return {
+                  description: t.description,
+                  amount: Number(t.amount).toFixed(2),
+                  type: t.type,
+                  date: t.date,
+                  category: categoryResolver(t),
+                  account: accInfo.name,
+                  isCreditCard: accInfo.isCreditCard
+                }
+              }),
+              insight,
+              showCard: true
+            }
+          }
+        } as any),
+
+        // ─── 3. Planejamento do Mês Futuro (Aba /planned) ─────────────────
+        getPlannedTransactions: tool({
+          description: 'Obtem o planejamento de orcamento e despesas previstas para os proximos meses exatamente igual a aba /planned.',
+          parameters: z.object({
             month: z.number().min(1).max(12).optional(),
             year: z.number().optional(),
           }),
           execute: async (args: any) => {
-            const month = args.month ?? qMonth
-            const year = args.year ?? qYear
-            const catQuery = (args.categoryName || extractCategory(userQuestion) || '').trim()
-            if (!catQuery) return { found: false, insight: 'Nao consegui identificar a categoria. Pode especificar melhor?', showCard: false }
-
-            const daysInMonth = new Date(year, month, 0).getDate()
-            const startDate = `${year}-${String(month).padStart(2,'0')}-01`
-            const endDate = `${year}-${String(month).padStart(2,'0')}-${String(daysInMonth).padStart(2,'0')}`
-
-            // Busca categoria por nome
-            const { data: categories } = await supabase.from('categories').select('id, name').ilike('name', `%${catQuery}%`)
-
-            if (!categories || categories.length === 0) {
-              // Tenta buscar por descricao de transacoes como fallback
-              const { data: txsByDesc } = await supabase
-                .from('transactions').select('description, amount, type, date, category:categories(name)')
-                .gte('date', startDate).lte('date', endDate)
-                .ilike('description', `%${catQuery}%`).eq('type', 'expense').order('amount', { ascending: false })
-
-              if (txsByDesc && txsByDesc.length > 0) {
-                const total = txsByDesc.reduce((s: number, t: any) => s + Number(t.amount), 0)
-                const txList = txsByDesc.slice(0,10).map((t: any) => ({ description: t.description, amount: Number(t.amount).toFixed(2), date: t.date, category: t.category?.name }))
-                const context = `Busca por "${catQuery}" em ${fmtMonth(month,year)} (por descricao, nao por categoria): ${txsByDesc.length} lancamentos. Total: ${fmtBRL(total)}.`
-                const insight = await generateInsight(userQuestion, context)
-                return { found: true, categoryQuery: catQuery, period: fmtMonth(month,year), totalSpent: Number(total.toFixed(2)), transactionCount: txsByDesc.length, transactions: txList, insight, showCard: true }
-              }
-
-              // Lista as categorias disponiveis para ajudar
-              const { data: allCats } = await supabase.from('categories').select('name').order('name')
-              const catList = (allCats || []).map((c: any) => c.name).join(', ')
-              const insight = await generateInsight(userQuestion, `Nao encontrada categoria "${catQuery}" para ${fmtMonth(month,year)}. Categorias existentes: ${catList}`)
-              return { found: false, categoryQuery: catQuery, period: fmtMonth(month,year), insight, showCard: false }
+            let targetMonth = args.month ?? previousMonthContext
+            let targetYear = args.year
+            if (!targetMonth) {
+              targetMonth = currentMonth === 12 ? 1 : currentMonth + 1
+              targetYear = currentMonth === 12 ? currentYear + 1 : currentYear
             }
+            if (!targetYear) targetYear = currentYear
 
-            const catIds = categories.map((c: any) => c.id)
-            const { data: txs, error } = await supabase
-              .from('transactions').select('description, amount, type, date, category:categories(name)')
-              .in('category_id', catIds).gte('date', startDate).lte('date', endDate)
-              .eq('type', 'expense').order('amount', { ascending: false })
+            const daysInTarget = new Date(targetYear, targetMonth, 0).getDate()
+            const startDate = `${targetYear}-${String(targetMonth).padStart(2, '0')}-01`
+            const endDate = `${targetYear}-${String(targetMonth).padStart(2, '0')}-${String(daysInTarget).padStart(2, '0')}`
 
-            if (error) return { found: false, categoryQuery: catQuery, error: error.message, insight: 'Erro ao buscar dados.', showCard: false }
-
-            const totalSpent = (txs||[]).reduce((s: number, t: any) => s + Number(t.amount), 0)
-            const txList = (txs||[]).slice(0,15).map((t: any) => ({ description: t.description, amount: Number(t.amount).toFixed(2), date: t.date, category: t.category?.name }))
-            const matchedNames = [...new Set(categories.map((c: any) => c.name as string))]
-
-            const context = `"${matchedNames.join(', ')}" em ${fmtMonth(month,year)}: Total ${fmtBRL(totalSpent)}, ${(txs||[]).length} lancamentos. Principais: ${txList.slice(0,5).map(t=>`${t.description}: ${fmtBRL(parseFloat(t.amount))}`).join(' | ')}`
-            const insight = await generateInsight(userQuestion, context)
-
-            return { found: (txs||[]).length > 0, categoryQuery: catQuery, matchedCategories: matchedNames, period: fmtMonth(month,year), totalSpent: Number(totalSpent.toFixed(2)), transactionCount: (txs||[]).length, transactions: txList, insight, showCard: (txs||[]).length > 0 }
-          }
-        } as any),
-
-        searchTransactions: tool({
-          description: 'Busca transacoes por palavra-chave na descricao.',
-          parameters: z.object({
-            query: z.string(),
-            months: z.number().min(1).max(12).optional(),
-          }),
-          execute: async (args: any) => {
-            const months = args.months ?? 3
-            const since = new Date(); since.setMonth(since.getMonth() - months)
-            const sinceStr = since.toISOString().split('T')[0]
-
-            const { data: txs, error } = await supabase
-              .from('transactions').select('description, amount, type, date, category:categories(name)')
-              .gte('date', sinceStr).ilike('description', `%${args.query}%`)
-              .order('date', { ascending: false }).limit(30)
-
-            if (error) return { found: false, query: args.query, error: error.message, insight: 'Erro ao buscar.', showCard: false }
-
-            const expenses = (txs||[]).filter((t: any) => t.type === 'expense')
-            const total = expenses.reduce((s: number, t: any) => s + Number(t.amount), 0)
-            const txList = (txs||[]).slice(0,10).map((t: any) => ({ description: t.description, amount: Number(t.amount).toFixed(2), type: t.type, date: t.date, category: t.category?.name }))
-
-            const context = `"${args.query}" nos ultimos ${months} meses: ${txList.length} transacoes, total ${fmtBRL(total)}.`
-            const insight = await generateInsight(userQuestion, context)
-
-            return { found: txList.length > 0, query: args.query, months, transactionCount: txList.length, totalSpent: Number(total.toFixed(2)), transactions: txList, insight, showCard: txList.length > 0 }
-          }
-        } as any),
-
-        getBudgetStatus: tool({
-          description: 'Status atual do mes: despesas confirmadas, pendentes e projecao.',
-          parameters: z.object({}),
-          execute: async () => {
-            const month = currentMonth, year = currentYear
-            const daysInMonth = new Date(year, month, 0).getDate()
-            const daysPassed = now.getDate()
-            const startDate = `${year}-${String(month).padStart(2,'0')}-01`
-            const endDate = `${year}-${String(month).padStart(2,'0')}-${String(daysInMonth).padStart(2,'0')}`
-
-            const { data: txs, error } = await supabase
-              .from('transactions').select('amount, type, status').gte('date', startDate).lte('date', endDate)
-
-            if (error) return { error: error.message, insight: 'Erro ao buscar dados.', showCard: false }
-
-            let realExpense = 0, realIncome = 0, pendingExpense = 0
-            for (const t of (txs as any[] || [])) {
-              if (t.status === 'confirmed' && t.type === 'expense') realExpense += Number(t.amount)
-              if (t.status === 'confirmed' && t.type === 'income') realIncome += Number(t.amount)
-              if (t.status === 'pending' && t.type === 'expense') pendingExpense += Number(t.amount)
-            }
-
-            const projectedExpense = daysPassed > 0 ? (realExpense / daysPassed) * daysInMonth : 0
-            const context = `${Math.round((daysPassed/daysInMonth)*100)}% do mes. Receitas: ${fmtBRL(realIncome)} | Despesas: ${fmtBRL(realExpense)} | Pendente: ${fmtBRL(pendingExpense)} | Projecao: ${fmtBRL(projectedExpense)}`
-            const insight = await generateInsight(userQuestion, context)
-
-            return { period: fmtMonth(month, year), monthProgress: `${Math.round((daysPassed/daysInMonth)*100)}% (dia ${daysPassed}/${daysInMonth})`, realExpense: Number(realExpense.toFixed(2)), realIncome: Number(realIncome.toFixed(2)), balance: Number((realIncome-realExpense).toFixed(2)), pendingExpense: Number(pendingExpense.toFixed(2)), projectedMonthlyExpense: Number(projectedExpense.toFixed(2)), insight, showCard: true }
-          }
-        } as any),
-
-        getUpcomingBills: tool({
-          description: 'Busca as proximas contas, transacoes pendentes e recorrentes previstas para os proximos dias ou mes.',
-          parameters: z.object({
-            days: z.number().optional().describe('Quantos dias para frente buscar (padrao 30)'),
-          }),
-          execute: async (args: any) => {
-            const days = args.days ?? 30
-            const from = new Date()
-            const to = new Date(); to.setDate(to.getDate() + days)
-            const fromStr = from.toISOString().split('T')[0]
-            const toStr = to.toISOString().split('T')[0]
-
-            // Busca transacoes pendentes ou agendadas no futuro
-            const { data: pending, error } = await supabase
+            // 1. Busca lançamentos cadastrados para o ciclo do próximo mês
+            const { data: targetTxs } = await supabase
               .from('transactions')
-              .select('description, amount, type, date, status, category:categories(name)')
-              .gte('date', fromStr).lte('date', toStr)
-              .in('status', ['pending', 'scheduled'])
-              .order('date', { ascending: true })
+              .select('id, category_id, account_id, description, amount, type, date, status, is_recurring, ignore_in_cashflow')
+              .gte('date', startDate).lte('date', endDate)
 
-            if (error) return { found: false, error: error.message, insight: 'Erro ao buscar contas previstas.', showCard: false }
+            let spentFixed = 0
+            let spentVariable = 0
+            let totalTargetIncome = 0
+            const fixedCategorySpentMap: Record<string, number> = {}
+            const variableCategorySpentMap: Record<string, number> = {}
 
-            const bills = (pending || []).filter((t: any) => t.type === 'expense')
-            const totalPending = bills.reduce((s: number, t: any) => s + Number(t.amount), 0)
-            const billList = bills.slice(0, 15).map((t: any) => ({
-              description: t.description,
-              amount: Number(t.amount).toFixed(2),
-              date: t.date,
-              status: t.status,
-              category: t.category?.name,
-            }))
+            const fixedCatIds = new Set((categoriesData || []).filter((c: any) => c.is_fixed && !c.is_investment).map((c: any) => c.id))
 
-            const context = `Proximas contas (${days} dias): ${bills.length} pendentes, total ${fmtBRL(totalPending)}.
-${billList.slice(0,8).map(t=>`${t.date}: ${t.description} ${fmtBRL(parseFloat(t.amount))}`).join(' | ')}
-${bills.length === 0 ? 'Nenhuma conta pendente encontrada nesse periodo.' : ''}`
+            if (targetTxs) {
+              for (const t of targetTxs as any[]) {
+                if (t.ignore_in_cashflow || t.type === 'transfer') continue
+                const amt = Number(t.amount) || 0
+                const cname = categoryResolver(t)
+                if (t.type === 'income') {
+                  totalTargetIncome += amt
+                } else if (t.type === 'expense') {
+                  const isFix = Boolean(t.is_recurring) || Boolean(t.category_id && fixedCatIds.has(t.category_id))
+                  if (isFix) {
+                    spentFixed += amt
+                    fixedCategorySpentMap[cname] = (fixedCategorySpentMap[cname] || 0) + amt
+                  } else {
+                    spentVariable += amt
+                    variableCategorySpentMap[cname] = (variableCategorySpentMap[cname] || 0) + amt
+                  }
+                }
+              }
+            }
 
-            const insight = await generateInsight(userQuestion, context)
+            // 2. Orçamentos base das categorias (budget_amount)
+            let plannedFixedBase = 0
+            let plannedVariableBase = 0
+            let plannedIncomeBase = 0
+            const fixedCategoryItems: { name: string; amount: number }[] = []
+            const variableCategoryItems: { name: string; amount: number }[] = []
 
-            return { found: bills.length > 0, daysAhead: days, totalPending: Number(totalPending.toFixed(2)), transactionCount: bills.length, transactions: billList, insight, showCard: bills.length > 0 }
+            if (categoriesData) {
+              for (const c of categoriesData as any[]) {
+                const amt = Number(c.budget_amount) || 0
+                if (c.type === 'income') {
+                  plannedIncomeBase += amt
+                } else if (c.type === 'expense' && !c.is_investment) {
+                  const spentInCat = c.is_fixed ? (fixedCategorySpentMap[c.name] || 0) : (variableCategorySpentMap[c.name] || 0)
+                  const finalCatAmount = Math.max(amt, spentInCat)
+
+                  if (c.is_fixed) {
+                    plannedFixedBase += amt
+                    if (finalCatAmount > 0) fixedCategoryItems.push({ name: c.name, amount: finalCatAmount })
+                  } else {
+                    plannedVariableBase += amt
+                    if (finalCatAmount > 0) variableCategoryItems.push({ name: c.name, amount: finalCatAmount })
+                  }
+                }
+              }
+            }
+
+            const plannedFixed = Math.max(plannedFixedBase, spentFixed)
+            const plannedVariable = Math.max(plannedVariableBase, spentVariable)
+            const plannedIncome = Math.max(plannedIncomeBase, totalTargetIncome)
+
+            const totalEstimatedExpense = plannedFixed + plannedVariable
+            const projectedBalance = plannedIncome - totalEstimatedExpense
+
+            const isDetailRequested = promptNorm.includes('detalha') || promptNorm.includes('detalhe') || promptNorm.includes('quais') || promptNorm.includes('item')
+
+            let insight = ''
+            if (isDetailRequested) {
+              const fixedLines = fixedCategoryItems.map(i => `- **${i.name}**: ${fmtBRL(i.amount)}`).join('\n')
+              const varLines = variableCategoryItems.map(i => `- **${i.name}**: ${fmtBRL(i.amount)}`).join('\n')
+
+              insight = `De acordo com a sua **Aba de Planejamento**, o detalhamento para **${fmtMonth(targetMonth, targetYear)}** é:\n\n` +
+                `### 📌 Custos Fixos (${fmtBRL(plannedFixed)}):\n${fixedLines || '- *Nenhum*'}\n\n` +
+                `### 💡 Custos Variáveis (${fmtBRL(plannedVariable)}):\n${varLines || '- *Nenhum*'}\n\n` +
+                `💰 **Receitas Previstas**: ${fmtBRL(plannedIncome)} | 🟢 **Saldo Projetado**: ${fmtBRL(projectedBalance)}`
+            } else {
+              insight = `De acordo com a sua **Aba de Planejamento**, o seu orçamento para **${fmtMonth(targetMonth, targetYear)}** está estimado em **${fmtBRL(totalEstimatedExpense)}** (**${fmtBRL(plannedFixed)}** em Custos Fixos + **${fmtBRL(plannedVariable)}** em Custos Variáveis).`
+            }
+
+            return {
+              cardType: 'planning',
+              found: true,
+              period: fmtMonth(targetMonth, targetYear),
+              fixedBills: {
+                total: Number(plannedFixed.toFixed(2)),
+                items: fixedCategoryItems
+              },
+              variableProjections: {
+                total: Number(plannedVariable.toFixed(2)),
+                items: variableCategoryItems
+              },
+              totalEstimatedExpense: Number(totalEstimatedExpense.toFixed(2)),
+              expectedIncome: Number(plannedIncome.toFixed(2)),
+              projectedBalance: Number(projectedBalance.toFixed(2)),
+              insight,
+              showCard: true
+            }
           }
         } as any),
+
+        // ─── 4. Saldos de Contas e Cofres de Investimentos ───────────────
+        getAccounts: tool({
+          description: 'Obtem os saldos atuais das contas bancarias, faturas de cartao e cofres de investimento do usuario.',
+          parameters: z.object({
+            accountName: z.string().optional(),
+          }),
+          execute: async (args: any) => {
+            const { data: accounts } = await supabase.from('accounts').select('id, name, type, initial_balance, is_hidden')
+
+            if (!accounts) return { cardType: 'accounts', found: false, insight: 'Nenhuma conta localizada.', showCard: false }
+
+            const { data: allTxs } = await supabase
+              .from('transactions')
+              .select('account_id, destination_account_id, type, amount, status')
+              .eq('status', 'posted')
+
+            const { data: vaults } = await supabase.from('account_vaults').select('id, name, balance, target_amount')
+
+            const calculatedAccounts = accounts.map((acc: any) => {
+              let balance = Number(acc.initial_balance) || 0
+              if (allTxs) {
+                for (const t of allTxs as any[]) {
+                  const amt = Number(t.amount) || 0
+                  if (t.type === 'income' && t.account_id === acc.id) balance += amt
+                  if (t.type === 'expense' && t.account_id === acc.id) balance -= amt
+                  if (t.type === 'transfer') {
+                    if (t.account_id === acc.id) balance -= amt
+                    if (t.destination_account_id === acc.id) balance += amt
+                  }
+                }
+              }
+              return { id: acc.id, name: acc.name, type: acc.type, balance: Number(balance.toFixed(2)), isHidden: acc.is_hidden }
+            })
+
+            let filtered = calculatedAccounts
+            if (args.accountName) {
+              const q = norm(args.accountName)
+              filtered = calculatedAccounts.filter((a: any) => norm(a.name).includes(q))
+            }
+
+            const totalLiquid = calculatedAccounts.reduce((s, a) => s + (a.type !== 'credit_card' ? a.balance : 0), 0)
+            const totalCreditDebt = calculatedAccounts.reduce((s, a) => s + (a.type === 'credit_card' ? Math.abs(a.balance) : 0), 0)
+            const totalVaults = (vaults || []).reduce((s, v) => s + (Number(v.balance) || 0), 0)
+
+            const insight = `Você possui **${filtered.length}** conta(s)/cartão(ões). Saldo líquido total: **${fmtBRL(totalLiquid)}** | Faturas de cartão: **${fmtBRL(totalCreditDebt)}** | Cofres/Investimentos: **${fmtBRL(totalVaults)}**.`
+
+            return {
+              cardType: 'accounts',
+              found: true,
+              totalLiquidBalance: Number(totalLiquid.toFixed(2)),
+              totalCreditDebt: Number(totalCreditDebt.toFixed(2)),
+              totalVaults: Number(totalVaults.toFixed(2)),
+              netTotal: Number((totalLiquid + totalVaults).toFixed(2)),
+              accountsList: filtered,
+              vaultsList: vaults || [],
+              insight,
+              showCard: true
+            }
+          }
+        } as any),
+
       },
-      toolChoice: selectedTool === 'getTransactionsSummary' ? undefined : { type: 'tool', toolName: selectedTool } as any,
-      onError: (err: any) => { console.error('[CHAT API] Stream error:', err) },
+      onError: (err: any) => {
+        console.error('[CHAT API] Stream error:', err)
+      },
     } as any)
 
     return result.toUIMessageStreamResponse()

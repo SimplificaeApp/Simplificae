@@ -118,21 +118,23 @@ const SUGGESTED_PROMPTS = [
 // Markdown renderer components (shared)
 // ──────────────────────────────────────────────
 const MD_COMPONENTS = {
-  h1: ({node, ...props}: any) => <h1 className="text-[17px] font-black mt-4 mb-2 text-slate-900" {...props}/>,
-  h2: ({node, ...props}: any) => <h2 className="text-base font-bold mt-4 mb-2 text-slate-800" {...props}/>,
-  h3: ({node, ...props}: any) => <h3 className="text-[15px] font-bold mt-3 mb-1.5 text-slate-800" {...props}/>,
-  p: ({node, ...props}: any) => <p className="mb-2.5 last:mb-0 leading-relaxed" {...props}/>,
-  ul: ({node, ...props}: any) => <ul className="list-disc list-outside ml-4 mb-3 space-y-1.5" {...props}/>,
-  ol: ({node, ...props}: any) => <ol className="list-decimal list-outside ml-4 mb-3 space-y-1.5" {...props}/>,
-  li: ({node, ...props}: any) => <li className="pl-1" {...props}/>,
-  strong: ({node, ...props}: any) => <strong className="font-bold text-slate-900" {...props}/>,
-  em: ({node, ...props}: any) => <em className="italic text-slate-600" {...props}/>,
-  hr: ({node, ...props}: any) => <hr className="my-4 border-slate-100" {...props}/>,
-  blockquote: ({node, ...props}: any) => <blockquote className="border-l-4 border-violet-300 pl-3 my-3 text-slate-600 italic" {...props}/>,
+  h1: ({node, ...props}: any) => <h1 className="text-base sm:text-[17px] font-black mt-3 mb-2 text-slate-900" {...props}/>,
+  h2: ({node, ...props}: any) => <h2 className="text-sm sm:text-base font-bold mt-3 mb-1.5 text-slate-800" {...props}/>,
+  h3: ({node, ...props}: any) => <h3 className="text-xs sm:text-[15px] font-bold mt-2.5 mb-1 text-slate-800" {...props}/>,
+  p: ({node, ...props}: any) => <p className="mb-2 last:mb-0 leading-relaxed text-slate-700 text-xs sm:text-sm" {...props}/>,
+  ul: ({node, ...props}: any) => <ul className="my-3 space-y-2 list-none p-0 w-full max-w-full" {...props}/>,
+  ol: ({node, ...props}: any) => <ol className="list-decimal list-outside ml-4 mb-3 space-y-1.5 text-xs sm:text-sm" {...props}/>,
+  li: ({node, ...props}: any) => (
+    <li className="flex items-center justify-between gap-2 p-2.5 px-3 rounded-xl bg-gradient-to-r from-slate-50 to-violet-50/40 border border-slate-200/60 shadow-2xs hover:border-violet-300 transition-all text-xs sm:text-sm text-slate-700 w-full max-w-full overflow-hidden" {...props}/>
+  ),
+  strong: ({node, ...props}: any) => <strong className="font-bold text-slate-900 shrink-0 text-xs sm:text-sm" {...props}/>,
+  em: ({node, ...props}: any) => <em className="text-[10px] sm:text-[11px] font-medium text-slate-500 bg-slate-100/90 border border-slate-200/50 px-2 py-0.5 rounded-full not-italic ml-auto shrink-0 whitespace-nowrap" {...props}/>,
+  hr: ({node, ...props}: any) => <hr className="my-3 border-slate-100" {...props}/>,
+  blockquote: ({node, ...props}: any) => <blockquote className="border-l-4 border-violet-300 pl-3 my-2 text-slate-600 italic text-xs sm:text-sm" {...props}/>,
   code: ({node, inline, ...props}: any) => inline
-    ? <code className="bg-violet-50 text-violet-700 px-1.5 py-0.5 rounded text-[13px] font-mono" {...props}/>
-    : <code className="block bg-slate-50 rounded-xl p-3 text-[13px] font-mono text-slate-700 my-2 overflow-x-auto" {...props}/>,
-  table: ({node, ...props}: any) => <div className="overflow-x-auto my-3"><table className="w-full text-left border-collapse text-sm" {...props}/></div>,
+    ? <code className="bg-violet-50 text-violet-700 border border-violet-100 px-1.5 py-0.5 rounded text-[11px] font-mono font-bold tracking-tight" {...props}/>
+    : <code className="block bg-slate-50 rounded-xl p-3 text-xs font-mono text-slate-700 my-2 overflow-x-auto max-w-full" {...props}/>,
+  table: ({node, ...props}: any) => <div className="overflow-x-auto my-3 max-w-full"><table className="w-full text-left border-collapse text-xs sm:text-sm" {...props}/></div>,
   th: ({node, ...props}: any) => <th className="border-b border-slate-200 py-2 px-3 font-semibold text-slate-800 bg-slate-50" {...props}/>,
   td: ({node, ...props}: any) => <td className="border-b border-slate-100 py-2 px-3" {...props}/>,
 }
@@ -146,54 +148,104 @@ function DataCard({ data }: { data: any }) {
     return isNaN(num) ? 'R$ 0,00' : num.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
   }
 
-  const isCategoryCard = data.categoryQuery !== undefined
-  const isSummaryCard = data.totalIncome !== undefined || data.totalExpense !== undefined
-  const isSearchCard = data.query !== undefined && data.transactions
+  const isCategoryCard = data.cardType === 'category' || (data.categoryQuery !== undefined && data.cardType !== 'summary')
+  const isAccountsCard = data.cardType === 'accounts' || data.accountsList !== undefined
+  const isPlanningCard = data.cardType === 'planning' || data.totalEstimatedExpense !== undefined
+  const isSearchCard = data.cardType === 'search' || (data.query !== undefined && data.transactions)
+  const isSummaryCard = data.cardType === 'summary' || (!isCategoryCard && !isAccountsCard && !isPlanningCard && !isSearchCard && (data.totalIncome !== undefined || data.totalExpense !== undefined))
   const isBudgetCard = data.monthProgress !== undefined && data.realExpense !== undefined
   const isUpcomingCard = data.daysAhead !== undefined
 
   // Respect server-side showCard flag
   if (data.showCard === false) return null
-  if (!data.found && !isBudgetCard) return null
+  if (!data.found && !isBudgetCard && !isAccountsCard && !isPlanningCard) return null
 
-  const cardIcon = isCategoryCard ? '🏷️' : isSummaryCard ? '📊' : isSearchCard ? '🔍' : isUpcomingCard ? '📆' : '📅'
-  const cardLabel = isCategoryCard ? 'Gastos por Categoria' : isSummaryCard ? 'Resumo do Período' : isSearchCard ? 'Busca de Transações' : isUpcomingCard ? 'Próximas Contas' : 'Status do Mês'
+  const cardIcon = isAccountsCard ? '💳' : isPlanningCard ? '🎯' : isCategoryCard ? '🏷️' : isSummaryCard ? '📊' : isSearchCard ? '🔍' : isUpcomingCard ? '📆' : '📅'
+  const cardLabel = isAccountsCard ? 'Contas & Saldos' : isPlanningCard ? 'Planejamento do Mês' : isCategoryCard ? 'Gastos por Categoria' : isSummaryCard ? 'Resumo do Período' : isSearchCard ? 'Lançamentos Localizados' : isUpcomingCard ? 'Próximas Contas' : 'Status do Mês'
 
   return (
-    <div className="bg-gradient-to-br from-slate-50 to-white border border-slate-200/80 rounded-2xl p-4 shadow-sm w-full max-w-sm mt-1">
+    <div className="bg-gradient-to-br from-slate-50 to-white border border-slate-200/80 rounded-2xl p-3.5 sm:p-4 shadow-xs w-full max-w-full sm:max-w-md mt-1 overflow-hidden">
       {/* Header */}
-      <div className="flex items-center gap-2 mb-3 pb-3 border-b border-slate-100">
-        <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-violet-500 to-indigo-600 flex items-center justify-center shadow-sm">
+      <div className="flex items-center gap-2 mb-3 pb-2.5 border-b border-slate-100">
+        <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-violet-500 to-indigo-600 flex items-center justify-center shadow-xs shrink-0">
           <span className="text-[13px]">
             {cardIcon}
           </span>
         </div>
-        <div>
-          <p className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">
+        <div className="min-w-0 flex-1">
+          <p className="text-[10px] font-extrabold text-slate-400 uppercase tracking-wider">
             {cardLabel}
-
           </p>
-          <p className="text-xs font-semibold text-slate-600">
+          <p className="text-xs font-semibold text-slate-700 truncate">
             {data.period || data.categoryQuery || data.query || ''}
           </p>
         </div>
       </div>
 
-      {/* Main numbers */}
+      {/* Accounts card */}
+      {isAccountsCard && (
+        <div className="flex flex-col gap-2 mb-3">
+          <div className="grid grid-cols-2 gap-2">
+            <div className="bg-emerald-50 border border-emerald-100/80 p-2.5 rounded-xl min-w-0">
+              <p className="text-[10px] font-bold text-emerald-600 uppercase tracking-wide truncate">Saldo em Contas</p>
+              <p className="text-xs sm:text-sm font-black text-emerald-700 truncate tabular-nums">{fmtBRL(data.totalLiquidBalance)}</p>
+            </div>
+            <div className="bg-violet-50 border border-violet-100/80 p-2.5 rounded-xl min-w-0">
+              <p className="text-[10px] font-bold text-violet-600 uppercase tracking-wide truncate">Cofres / Invest.</p>
+              <p className="text-xs sm:text-sm font-black text-violet-700 truncate tabular-nums">{fmtBRL(data.totalVaults)}</p>
+            </div>
+          </div>
+          {data.accountsList && data.accountsList.length > 0 && (
+            <div className="flex flex-col gap-1 mt-1">
+              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Suas Contas</p>
+              {data.accountsList.map((acc: any, idx: number) => (
+                <div key={idx} className="flex justify-between items-center text-xs py-1.5 px-2.5 bg-slate-50 rounded-lg min-w-0 gap-2">
+                  <span className="text-slate-700 font-medium truncate min-w-0">{acc.name}</span>
+                  <span className={`font-bold shrink-0 tabular-nums ${acc.balance >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
+                    {fmtBRL(acc.balance)}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Planning Card */}
+      {isPlanningCard && (
+        <div className="flex flex-col gap-2 mb-3">
+          <div className="grid grid-cols-2 gap-2">
+            <div className="bg-amber-50 border border-amber-100/80 p-2.5 rounded-xl min-w-0">
+              <p className="text-[10px] font-bold text-amber-600 uppercase tracking-wide truncate">Custos Fixos</p>
+              <p className="text-xs sm:text-sm font-black text-amber-700 truncate tabular-nums">{fmtBRL(data.fixedBills?.total ?? 0)}</p>
+            </div>
+            <div className="bg-indigo-50 border border-indigo-100/80 p-2.5 rounded-xl min-w-0">
+              <p className="text-[10px] font-bold text-indigo-600 uppercase tracking-wide truncate">Variáveis (Est.)</p>
+              <p className="text-xs sm:text-sm font-black text-indigo-700 truncate tabular-nums">{fmtBRL(data.variableProjections?.total ?? 0)}</p>
+            </div>
+          </div>
+          <div className="bg-slate-100 border border-slate-200 p-2.5 rounded-xl flex justify-between items-center gap-2 min-w-0">
+            <span className="text-xs font-semibold text-slate-600 shrink-0">Total Previsto</span>
+            <span className="text-xs sm:text-sm font-black text-slate-900 shrink-0 tabular-nums ml-auto">{fmtBRL(data.totalEstimatedExpense)}</span>
+          </div>
+        </div>
+      )}
+
+      {/* Summary card */}
       {isSummaryCard && (
         <div className="grid grid-cols-2 gap-2 mb-3">
-          <div className="bg-emerald-50 border border-emerald-100/80 p-3 rounded-xl">
-            <p className="text-[10px] font-bold text-emerald-600 uppercase tracking-wide mb-0.5">Receitas</p>
-            <p className="text-sm font-black text-emerald-700">{fmtBRL(data.totalIncome ?? 0)}</p>
+          <div className="bg-emerald-50 border border-emerald-100/80 p-2.5 sm:p-3 rounded-xl min-w-0">
+            <p className="text-[10px] font-bold text-emerald-600 uppercase tracking-wide mb-0.5 truncate">Receitas</p>
+            <p className="text-xs sm:text-sm font-black text-emerald-700 truncate tabular-nums">{fmtBRL(data.totalIncome ?? 0)}</p>
           </div>
-          <div className="bg-rose-50 border border-rose-100/80 p-3 rounded-xl">
-            <p className="text-[10px] font-bold text-rose-600 uppercase tracking-wide mb-0.5">Despesas</p>
-            <p className="text-sm font-black text-rose-700">{fmtBRL(data.totalExpense ?? 0)}</p>
+          <div className="bg-rose-50 border border-rose-100/80 p-2.5 sm:p-3 rounded-xl min-w-0">
+            <p className="text-[10px] font-bold text-rose-600 uppercase tracking-wide mb-0.5 truncate">Despesas</p>
+            <p className="text-xs sm:text-sm font-black text-rose-700 truncate tabular-nums">{fmtBRL(data.totalExpense ?? 0)}</p>
           </div>
           {data.balance !== undefined && (
-            <div className={`col-span-2 p-3 rounded-xl border flex justify-between items-center ${parseFloat(String(data.balance)) >= 0 ? 'bg-emerald-50 border-emerald-100' : 'bg-rose-50 border-rose-100'}`}>
-              <span className="text-xs font-semibold text-slate-500">Saldo do Período</span>
-              <span className={`text-sm font-black ${parseFloat(String(data.balance)) >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
+            <div className={`col-span-2 p-2.5 sm:p-3 rounded-xl border flex justify-between items-center gap-2 min-w-0 ${parseFloat(String(data.balance)) >= 0 ? 'bg-emerald-50 border-emerald-100' : 'bg-rose-50 border-rose-100'}`}>
+              <span className="text-xs font-semibold text-slate-600 shrink-0">Saldo do Período</span>
+              <span className={`text-xs sm:text-sm font-black shrink-0 tabular-nums ml-auto ${parseFloat(String(data.balance)) >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
                 {fmtBRL(data.balance)}
               </span>
             </div>
@@ -209,11 +261,55 @@ function DataCard({ data }: { data: any }) {
         </div>
       )}
 
-      {isSearchCard && data.totalSpent !== undefined && (
-        <div className="bg-violet-50 border border-violet-100/80 p-3 rounded-xl mb-3">
-          <p className="text-[10px] font-bold text-violet-600 uppercase tracking-wide mb-0.5">Total Encontrado</p>
-          <p className="text-lg font-black text-violet-700">{fmtBRL(data.totalSpent)}</p>
-          <p className="text-[11px] text-violet-400 mt-0.5">{data.transactionCount} ocorrência{data.transactionCount !== 1 ? 's' : ''} em {data.months} mês{data.months !== 1 ? 'es' : ''}</p>
+      {/* Transaction List Card (Search) */}
+      {isSearchCard && data.transactions && data.transactions.length > 0 && (
+        <div className="space-y-2 mt-2">
+          {data.transactions.map((t: any, i: number) => {
+            const amt = parseFloat(t.amount || '0')
+            const isExpense = t.type === 'expense'
+            const dStr = t.date ? new Date(t.date + 'T12:00:00').toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' }) : ''
+            const catName = t.category || 'Geral'
+            
+            return (
+              <div
+                key={i}
+                className="p-3 rounded-xl bg-white border border-slate-200/70 shadow-2xs hover:border-violet-200 transition-all w-full space-y-1.5"
+              >
+                {/* Line 1: Icon, Full Merchant Name, and Amount */}
+                <div className="flex items-start justify-between gap-2.5">
+                  <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                    <div className="w-7 h-7 rounded-lg bg-violet-100/90 text-violet-700 flex items-center justify-center shrink-0 font-extrabold text-[10px] shadow-2xs mt-0.5">
+                      {catName.slice(0, 2).toUpperCase()}
+                    </div>
+                    <p className="font-bold text-slate-800 text-xs sm:text-sm leading-snug break-words">
+                      {t.description || 'Lançamento'}
+                    </p>
+                  </div>
+                  <span className={`font-black text-xs sm:text-sm tabular-nums shrink-0 ml-2 ${isExpense ? 'text-slate-900' : 'text-emerald-600'}`}>
+                    {isExpense ? '- ' : '+ '}{fmtBRL(amt)}
+                  </span>
+                </div>
+
+                {/* Line 2: Date, Category & Payment Method Pill */}
+                <div className="flex items-center justify-between text-[11px] text-slate-400 font-medium pt-1 border-t border-slate-100/80">
+                  <div className="flex items-center gap-1.5 min-w-0">
+                    <span className="shrink-0">{dStr}</span>
+                    <span>·</span>
+                    <span className="truncate">{catName}</span>
+                  </div>
+                  {t.isCreditCard ? (
+                    <span className="bg-violet-50 text-violet-600 border border-violet-100 px-2 py-0.5 rounded-full font-bold text-[9.5px] shrink-0 ml-2">
+                      Cartão
+                    </span>
+                  ) : (
+                    <span className="bg-slate-50 text-slate-500 border border-slate-200/60 px-2 py-0.5 rounded-full font-semibold text-[9.5px] shrink-0 ml-2">
+                      Conta
+                    </span>
+                  )}
+                </div>
+              </div>
+            )
+          })}
         </div>
       )}
 
@@ -254,26 +350,6 @@ function DataCard({ data }: { data: any }) {
                 </div>
               )
             })}
-          </div>
-        </div>
-      )}
-
-      {/* Transactions list */}
-      {data.transactions && data.transactions.length > 0 && (
-        <div className="mt-3">
-          <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">Lançamentos</p>
-          <div className="flex flex-col gap-1">
-            {data.transactions.map((tx: any, idx: number) => (
-              <div key={idx} className="flex justify-between items-center text-xs py-1.5 px-2.5 bg-slate-50 rounded-lg gap-2">
-                <div className="min-w-0">
-                  <span className="text-slate-700 font-medium truncate block max-w-[160px]">{tx.description || tx.category || '—'}</span>
-                  {tx.date && <span className="text-slate-400 text-[10px]">{new Date(tx.date + 'T12:00:00').toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' })}</span>}
-                </div>
-                <span className={`font-bold shrink-0 ${tx.type === 'income' ? 'text-emerald-600' : 'text-rose-600'}`}>
-                  {tx.type === 'income' ? '+' : ''}{fmtBRL(tx.amount)}
-                </span>
-              </div>
-            ))}
           </div>
         </div>
       )}
@@ -426,7 +502,7 @@ export function AssistantClient() {
   useEffect(() => {
     if (error) {
       const msg = error.message.includes('An error occurred') 
-        ? 'Limite de uso da IA atingido (Google Gemini Free). Aguarde 1 minuto e tente novamente.' 
+        ? 'Erro ao comunicar com a IA. Aguarde alguns instantes e tente novamente.' 
         : error.message;
       toast.error('Erro na IA: ' + msg.substring(0, 150))
     }
@@ -522,26 +598,26 @@ export function AssistantClient() {
       {/* ─── RIGHT COLUMN: CHAT ─── */}
       <div className="relative flex-1 min-w-0 flex flex-col bg-white md:rounded-3xl border-0 md:border border-slate-100 shadow-sm overflow-hidden h-full min-h-0">
 
-        {/* Chat header (Desktop Only) */}
-        <div className="hidden md:flex px-5 py-4 border-b border-slate-100 items-center justify-between shrink-0 bg-white">
-          <div className="flex items-center gap-3">
+        {/* Chat header (Visible on all devices) */}
+        <div className="flex px-3.5 sm:px-5 py-3 border-b border-slate-100 items-center justify-between shrink-0 bg-white sticky top-0 z-10">
+          <div className="flex items-center gap-2.5 sm:gap-3">
             <div className="relative">
-              <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-violet-500 to-indigo-600 flex items-center justify-center shadow-md shadow-violet-200">
-                <Bot className="w-4.5 h-4.5 text-white" />
+              <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-xl bg-gradient-to-br from-violet-500 to-indigo-600 flex items-center justify-center shadow-md shadow-violet-200">
+                <Bot className="w-4 h-4 sm:w-4.5 sm:h-4.5 text-white" />
               </div>
               <span className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-emerald-400 border-2 border-white" />
             </div>
             <div className="min-w-0">
-              <p className="font-bold text-slate-800 text-sm truncate">Chat IA</p>
+              <p className="font-bold text-slate-800 text-xs sm:text-sm truncate">Chat IA</p>
               <p className="text-[10px] text-slate-400 font-medium truncate">Responde com base nos seus dados</p>
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1.5 sm:gap-2">
             {messages.length > 0 && (
               <button
                 onClick={() => setMessages([])}
-                className="flex items-center gap-1.5 text-xs font-semibold text-slate-400 hover:text-slate-600 bg-slate-50 hover:bg-slate-100 px-3 py-1.5 rounded-xl transition-colors"
+                className="flex items-center gap-1 text-[11px] sm:text-xs font-semibold text-slate-400 hover:text-slate-600 bg-slate-50 hover:bg-slate-100 px-2.5 sm:px-3 py-1.5 rounded-xl transition-colors"
               >
                 <RotateCcw className="w-3 h-3" />
                 Limpar
@@ -549,32 +625,12 @@ export function AssistantClient() {
             )}
             <button
               onClick={() => setIsMobileInsightsOpen(true)}
-              className="xl:hidden flex items-center gap-1.5 text-xs font-semibold text-violet-600 hover:text-violet-700 bg-violet-50 hover:bg-violet-100 px-3 py-1.5 rounded-xl transition-colors"
+              className="xl:hidden flex items-center gap-1 text-[11px] sm:text-xs font-semibold text-violet-600 hover:text-violet-700 bg-violet-50 hover:bg-violet-100 px-2.5 sm:px-3 py-1.5 rounded-xl transition-colors"
             >
               <Zap className="w-3.5 h-3.5" />
               Insights
             </button>
           </div>
-        </div>
-
-        {/* Mobile Floating Actions */}
-        <div className="md:hidden absolute top-4 right-4 z-10 flex items-center gap-2">
-          {messages.length > 0 && (
-            <button
-              onClick={() => setMessages([])}
-              className="flex items-center gap-1.5 text-[11px] font-semibold text-slate-500 hover:text-slate-700 bg-white/80 backdrop-blur shadow-sm border border-slate-200/60 px-2.5 py-1.5 rounded-full transition-colors"
-            >
-              <RotateCcw className="w-3 h-3" />
-              Limpar
-            </button>
-          )}
-          <button
-            onClick={() => setIsMobileInsightsOpen(true)}
-            className="flex items-center gap-1.5 text-[11px] font-semibold text-violet-600 hover:text-violet-700 bg-white/80 backdrop-blur shadow-sm border border-violet-100 px-2.5 py-1.5 rounded-full transition-colors"
-          >
-            <Zap className="w-3.5 h-3.5" />
-            Insights
-          </button>
         </div>
 
         {/* Messages */}
