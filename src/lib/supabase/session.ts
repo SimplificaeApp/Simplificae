@@ -8,6 +8,7 @@ export async function updateSession(request: NextRequest) {
 
   const pathname = request.nextUrl.pathname
   const isAuthPage = pathname === '/login' || pathname === '/register' || pathname.startsWith('/forgot-password') || pathname.startsWith('/reset-password')
+  const isApiRoute = pathname.startsWith('/api')
 
   // Quick check if any auth cookie is present
   const cookies = request.cookies.getAll()
@@ -19,7 +20,7 @@ export async function updateSession(request: NextRequest) {
   }
 
   // Fast-path: if no auth cookie and accessing protected routes, redirect immediately without API roundtrip
-  if (!hasAuthToken && !isAuthPage && (pathname === '/' || pathname.startsWith('/planned') || pathname.startsWith('/transactions') || pathname.startsWith('/accounts') || pathname.startsWith('/credit-cards') || pathname.startsWith('/settings'))) {
+  if (!hasAuthToken && !isAuthPage && !isApiRoute && (pathname === '/' || pathname.startsWith('/planned') || pathname.startsWith('/transactions') || pathname.startsWith('/accounts') || pathname.startsWith('/credit-cards') || pathname.startsWith('/settings'))) {
     const url = request.nextUrl.clone()
     url.pathname = '/login'
     return NextResponse.redirect(url)
@@ -53,7 +54,7 @@ export async function updateSession(request: NextRequest) {
   } = await supabase.auth.getUser()
 
   // Protect root/dashboard route
-  if (!user && !isAuthPage) {
+  if (!user && !isAuthPage && !isApiRoute) {
     const url = request.nextUrl.clone()
     url.pathname = '/login'
     return NextResponse.redirect(url)
