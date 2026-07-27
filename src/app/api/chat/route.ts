@@ -25,524 +25,492 @@ export async function POST(req: Request) {
   const body = await req.json().catch(() => ({}))
   const rawMessages: any[] = Array.isArray(body) ? body : (Array.isArray(body?.messages) ? body.messages : [])
 
-  const lastUserMsg = [...rawMessages].reverse().find((m: any) => m.role === 'user')
-  const lastUserText = typeof lastUserMsg?.content === 'string'
-    ? lastUserMsg.content
-    : (Array.isArray(lastUserMsg?.parts) ? lastUserMsg.parts.filter((p: any) => p.type === 'text').map((p: any) => p.text || '').join('') : '')
+  // ── Carrega metadados do usuário para o system prompt ──
+  const { data: categoriesData } = await supabase
+    .from('categories')
+    .select('id, name, type, is_fixed, is_investment, budget_amount')
 
-  const promptNorm = norm(lastUserText)
+  const { data: accountsData } = await supabase
+    .from('accounts')
+    .select('id, name, type, initial_balance')
 
-  // 1. Carrega Contexto Global do Usuário
-  const { data: categoriesData } = await supabase.from('categories').select('id, name, type, is_fixed, is_investment, budget_amount')
-  const { data: accountsData } = await supabase.from('accounts').select('id, name, type, initial_balance')
-  const { data: vaultsData } = await supabase.from('account_vaults').select('id, name, balance')
+  const { data: vaultsData } = await supabase
+    .from('account_vaults')
+    .select('id, name, balance')
 
-  const categoryIdToNameMap: Record<string, { name: string; isInvestment: boolean; isFixed: boolean }> = {}
-  if (categoriesData) {
-    for (const c of categoriesData as any[]) {
-      categoryIdToNameMap[c.id] = { name: c.name, isInvestment: !!c.is_investment, isFixed: !!c.is_fixed }
-    }
+  const categoryIdToMeta: Record<string, { name: string; isInvestment: boolean; isFixed: boolean; type: string }> = {}
+  for (const c of (categoriesData || []) as any[]) {
+    categoryIdToMeta[c.id] = { name: c.name, isInvestment: !!c.is_investment, isFixed: !!c.is_fixed, type: c.type }
   }
 
-  const accountIdMap: Record<string, { id: string; name: string; type: string }> = {}
-  if (accountsData) {
-    for (const a of accountsData as any[]) {
-      accountIdMap[a.id] = { id: a.id, name: a.name, type: a.type }
-    }
+  const accountIdToMeta: Record<string, { name: string; type: string }> = {}
+  for (const a of (accountsData || []) as any[]) {
+    accountIdToMeta[a.id] = { name: a.name, type: a.type }
   }
 
-  const categoryResolver = (t: any): string => {
-    if (t.category_id && categoryIdToNameMap[t.category_id]) return categoryIdToNameMap[t.category_id].name
+  const resolveCategory = (t: any): string => {
+    if (t.category_id && categoryIdToMeta[t.category_id]) return categoryIdToMeta[t.category_id].name
     if (typeof t.category === 'string') return t.category
-    if (Array.isArray(t.category) && t.category.length > 0) return t.category[0]?.name || 'Outros'
+    if (Array.isArray(t.category) && t.category.length) return t.category[0]?.name || 'Outros'
     if (typeof t.category === 'object' && t.category?.name) return t.category.name
     return 'Outros'
   }
 
-  const accountResolver = (t: any): { name: string; type: string; isCreditCard: boolean } => {
-    const accObj = t.account_id ? accountIdMap[t.account_id] : null
-    if (accObj) {
-      return { name: accObj.name, type: accObj.type, isCreditCard: accObj.type === 'credit_card' }
-    }
-    const name = typeof t.account === 'string' ? t.account : (t.account?.name || '')
+  const resolveAccount = (t: any): { name: string; isCreditCard: boolean } => {
+    const meta = t.account_id ? accountIdToMeta[t.account_id] : null
+    if (meta) return { name: meta.name, isCreditCard: meta.type === 'credit_card' }
+    const name = typeof t.account === 'string' ? t.account : (t.account?.name || 'Desconhecida')
     const type = t.account?.type || ''
-    return { name, type, isCreditCard: type === 'credit_card' }
+    return { name, isCreditCard: type === 'credit_card' }
   }
 
-  const categoriesList = (categoriesData || []).map((c: any) => c.name).filter(Boolean)
-  const bankAccounts = (accountsData || []).filter((a: any) => a.type !== 'credit_card')
-  const creditCards = (accountsData || []).filter((a: any) => a.type === 'credit_card')
-  
-  const bankAccountsStr = bankAccounts.map((a: any) => `${a.name} (Conta)`).join(', ')
-  const creditCardsStr = creditCards.map((a: any) => `${a.name} (Cartão de Crédito)`).join(', ')
-  const accountsList = (accountsData || []).map((a: any) => a.name).filter(Boolean)
-  const vaultsList = (vaultsData || []).map((v: any) => `${v.name}: ${fmtBRL(Number(v.balance) || 0)}`)
+  // Metadados para o system prompt
+  const bankAccountNames = (accountsData || []).filter((a: any) => a.type !== 'credit_card').map((a: any) => a.name).join(', ')
+  const creditCardNames = (accountsData || []).filter((a: any) => a.type === 'credit_card').map((a: any) => a.name).join(', ')
+  const categoryNames = (categoriesData || []).map((c: any) => {
+    const tags = []
+    if (c.is_fixed) tags.push('fixo')
+    if (c.is_investment) tags.push('investimento')
+    return c.name + (tags.length ? ` (${tags.join(', ')})` : '')
+  }).join(', ')
+  const vaultNames = (vaultsData || []).map((v: any) => `${v.name}: ${fmtBRL(Number(v.balance))}`).join(', ')
 
-  // Memória de Contexto Multiturno (Categoria, Conta, Mês)
-  let previousCategoryContext: string | null = null
-  let previousAccountContext: string | null = null
-  let previousMonthContext: number | null = null
-
+  // ── Converte mensagens ──
   const aiMessages: any[] = []
   for (const m of rawMessages) {
     if (m.role === 'user') {
       const text = typeof m.content === 'string'
         ? m.content
         : (Array.isArray(m.parts) ? m.parts.filter((p: any) => p.type === 'text').map((p: any) => p.text || '').join('') : '')
-      
-      if (text.trim()) {
-        aiMessages.push({ role: 'user', content: text })
-        const mNorm = norm(text)
-        for (const cName of categoriesList) {
-          if (mNorm.includes(norm(cName))) {
-            previousCategoryContext = cName
-            break
-          }
-        }
-        for (const aName of accountsList) {
-          if (mNorm.includes(norm(aName))) {
-            previousAccountContext = aName
-            break
-          }
-        }
-        if (mNorm.includes('agosto')) previousMonthContext = 8
-        if (mNorm.includes('julho')) previousMonthContext = 7
-        if (mNorm.includes('setembro')) previousMonthContext = 9
-      }
+      if (text.trim()) aiMessages.push({ role: 'user', content: text })
     } else if (m.role === 'assistant') {
       const parts = Array.isArray(m.parts) ? m.parts : []
-      const textStr = parts.filter((p: any) => p.type === 'text').map((p: any) => p.text || p.textDelta || '').join('')
-      const toolInsightStr = parts
+      const text = parts.filter((p: any) => p.type === 'text').map((p: any) => p.text || p.textDelta || '').join('')
+      const toolResults = parts
         .filter((p: any) => p.type === 'tool-invocation' || p.toolInvocation)
         .map((p: any) => {
           const inv = p.toolInvocation || p
           const res = inv.result || inv.output || p.result || p.output
-          if (res && typeof res === 'object' && res.insight) return res.insight
+          if (res && typeof res === 'object') {
+            return JSON.stringify(res)
+          }
           return ''
         })
         .filter(Boolean)
         .join('\n')
 
-      const finalContent = textStr || toolInsightStr || (typeof m.content === 'string' ? m.content : '') || 'OK.'
+      const finalContent = text || toolResults || (typeof m.content === 'string' ? m.content : '') || 'OK.'
       aiMessages.push({ role: 'assistant', content: finalContent })
     }
   }
 
   const now = new Date()
-  const today = now.toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })
   const currentMonth = now.getMonth() + 1
   const currentYear = now.getFullYear()
+  const today = now.toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })
 
-  const systemPrompt = `Você é o assistente pessoal de inteligência financeira da plataforma Simplificae.
-Hoje é ${today}. O mês de referência atual é ${currentMonth}/${currentYear} (${fmtMonth(currentMonth, currentYear)}).
+  const systemPrompt = `Você é o assistente financeiro pessoal inteligente da plataforma Simplificae. Seu objetivo é ajudar o usuário a entender e melhorar suas finanças pessoais com análises ricas, insights práticos e respostas contextuais completas — como um consultor financeiro de verdade.
 
-SEU CONTEXTO FINANCEIRO:
-- Contas Bancárias (Débito/Líquido): ${bankAccountsStr || 'Nenhuma'}
-- Cartões de Crédito (Fatura): ${creditCardsStr || 'Nenhum'}
-- Categorias cadastradas: ${categoriesList.join(', ')}
-- Cofres e Investimentos: ${vaultsList.length > 0 ? vaultsList.join(', ') : 'Nenhum'}
+**Data atual:** ${today}
+**Mês/Ano atual:** ${currentMonth}/${currentYear} (${fmtMonth(currentMonth, currentYear)})
 
-REGRAS OBRIGATÓRIAS:
-1. SEMPRE FORNEÇA RESPOSTAS EM TEXTO RICAS E COMPLETAS:
-   - Nunca responda em branco. Sempre comente os números, forneça análises e explicações claras.
+**Dados do usuário (contexto permanente):**
+- Contas bancárias: ${bankAccountNames || 'Nenhuma'}
+- Cartões de crédito: ${creditCardNames || 'Nenhum'}
+- Categorias: ${categoryNames || 'Nenhuma'}
+- Cofres/Investimentos: ${vaultNames || 'Nenhum'}
 
-2. QUANDO O USUÁRIO PERGUNTAR POR INVESTIMENTOS ("quanto investi", "quanto guardei", "cofres"):
-   - Busque as transações de categorias de investimento (ex: Renda Fixa) ou aportes em cofres.
+**COMO VOCÊ DEVE SE COMPORTAR:**
 
-3. CONTINUIDADE DE PERÍODO E PERGUNTAS DE DETALHAMENTO ("detalha melhor", "o que seriam esses"):
-   - Se o usuário perguntou sobre agosto ou sobre uma categoria específica, mantenha esse contexto e explique detalhadamente em formato Markdown com marcadores.`
+1. **Entenda a intenção, não a frase literal.** Se o usuário perguntar "quanto gastei em futebol?", use a ferramenta getTransactions com keyword "futebol" — não procure pela string "futebol" nas categorias existentes. Se não houver transações, informe isso claramente. Nunca retorne resultados de outra coisa.
+
+2. **Mantenha o contexto da conversa.** Se antes você falou sobre agosto e o usuário diz "o que seriam essas outras despesas?", você sabe que ele quer detalhes de agosto, da categoria "Outras Despesas". Use as ferramentas para buscar os dados necessários desse contexto específico.
+
+3. **Sempre escreva uma resposta textual rica e completa** após usar qualquer ferramenta. Nunca retorne apenas o card visual sem texto. Explique os dados, dê insights e seja útil.
+
+4. **Para perguntas genéricas** ("como posso economizar?", "quais são meus maiores gastos?", "tenho dinheiro sobrando?"), use as ferramentas para buscar dados reais e construa uma análise personalizada. Não dê respostas genéricas.
+
+5. **Para pedidos de detalhamento** ("detalha melhor", "me explique isso", "quais são esses gastos"), analise o que foi mencionado no turno anterior e vá mais fundo: liste cada transação, compare com meses anteriores, dê dicas de redução.
+
+**REGRAS DOS DADOS:**
+- Ignore transações com ignore_in_cashflow=true, tipo "transfer", descrição "ajuste manual" ou "aporte no cofrinho" nas análises de fluxo de caixa normal.
+- Para perguntas de investimento ("quanto investi", "quanto guardei"), busque transações de categorias marcadas como investimento ou aportes em cofres.
+
+**FORMATAÇÃO:**
+- Use Markdown completo: **negrito**, listas, tabelas, emojis
+- Valores sempre em formato BRL (R$ X.XXX,XX)
+- Seja direto, analítico e empático
+- Máximo de 3 perguntas de esclarecimento se necessário; prefira agir com o contexto disponível`
+
+  const now2 = new Date()
+  const cm = now2.getMonth() + 1
+  const cy = now2.getFullYear()
 
   try {
     const result = streamText({
       model: google('gemini-3.5-flash-lite'),
       system: systemPrompt,
       messages: aiMessages,
-      maxSteps: 5,
+      maxSteps: 8,
       tools: {
-        // ─── 1. Resumo Financeiro Geral do Mês ─────────────────────────────
+        /**
+         * Busca o resumo financeiro de um mês:
+         * receitas, despesas, saldo, top categorias
+         */
         getFinancialSummary: tool({
-          description: 'Obtem o resumo financeiro do mes (total de receitas, total de despesas, saldo e principais categorias).',
+          description: 'Obtém receitas totais, despesas totais, saldo do período e ranking de gastos por categoria de um determinado mês/ano. Use para perguntas sobre "como foram meus gastos", "quanto gastei no mês", "qual meu saldo", etc.',
           parameters: z.object({
-            month: z.number().min(1).max(12).optional(),
-            year: z.number().optional(),
-            excludeCategory: z.string().optional(),
+            month: z.number().min(1).max(12).optional().describe('Mês (1-12). Default: mês atual'),
+            year: z.number().optional().describe('Ano. Default: ano atual'),
+            excludeCategory: z.string().optional().describe('Nome de categoria para excluir do resumo'),
           }),
-          execute: async (args: any) => {
-            const m = args.month ?? previousMonthContext ?? currentMonth
-            const y = args.year ?? currentYear
+          execute: async ({ month, year, excludeCategory }: any) => {
+            const m = month ?? cm
+            const y = year ?? cy
             const daysInMonth = new Date(y, m, 0).getDate()
-            const startDate = `${y}-${String(m).padStart(2,'0')}-01`
-            const endDate = `${y}-${String(m).padStart(2,'0')}-${String(daysInMonth).padStart(2,'0')}`
-
-            const excludeQuery = args.excludeCategory ? norm(args.excludeCategory) : null
+            const start = `${y}-${String(m).padStart(2, '0')}-01`
+            const end = `${y}-${String(m).padStart(2, '0')}-${String(daysInMonth).padStart(2, '0')}`
+            const excludeNorm = excludeCategory ? norm(excludeCategory) : null
 
             const { data: txs } = await supabase
               .from('transactions')
               .select('id, category_id, account_id, description, amount, type, date, ignore_in_cashflow')
-              .gte('date', startDate).lte('date', endDate)
+              .gte('date', start).lte('date', end)
 
-            if (!txs) return { found: false, period: fmtMonth(m, y), insight: `Sem lançamentos registrados em ${fmtMonth(m, y)}.`, showCard: false }
+            if (!txs?.length) {
+              return { found: false, period: fmtMonth(m, y), message: `Nenhum lançamento encontrado em ${fmtMonth(m, y)}.`, showCard: false }
+            }
 
-            let totalIncome = 0
-            let totalExpense = 0
-            let excludedTotal = 0
+            let income = 0, expense = 0, excluded = 0
             const catMap: Record<string, number> = {}
 
             for (const t of txs as any[]) {
               if (t.ignore_in_cashflow || t.type === 'transfer') continue
-              const cname = categoryResolver(t)
-              const cnameNorm = norm(cname)
-              const descNorm = norm(t.description || '')
-
-              if (descNorm.includes('ajuste manual') || descNorm.includes('aporte no cofrinho')) continue
-
-              if (excludeQuery && (cnameNorm.includes(excludeQuery) || descNorm.includes(excludeQuery))) {
-                if (t.type === 'expense') excludedTotal += Number(t.amount)
+              const desc = norm(t.description || '')
+              if (desc.includes('ajuste manual') || desc.includes('aporte no cofrinho')) continue
+              const cat = resolveCategory(t)
+              const catN = norm(cat)
+              if (excludeNorm && (catN.includes(excludeNorm) || desc.includes(excludeNorm))) {
+                if (t.type === 'expense') excluded += Number(t.amount)
                 continue
               }
-
               const amt = Number(t.amount) || 0
-              if (t.type === 'income') totalIncome += amt
+              if (t.type === 'income') income += amt
               if (t.type === 'expense') {
-                totalExpense += amt
-                catMap[cname] = (catMap[cname] || 0) + amt
+                expense += amt
+                catMap[cat] = (catMap[cat] || 0) + amt
               }
             }
 
-            const balance = totalIncome - totalExpense
+            const balance = income - expense
             const topCategories = Object.entries(catMap)
               .sort(([, a], [, b]) => b - a)
               .map(([name, total]) => ({ name, total: Number(total.toFixed(2)) }))
 
             const balanceStr = balance >= 0 ? `saldo positivo de **${fmtBRL(balance)}**` : `déficit de **${fmtBRL(Math.abs(balance))}**`
-            const excludeNote = excludeQuery && excludedTotal > 0 ? ` (desconsiderando a categoria **${args.excludeCategory}** de **${fmtBRL(excludedTotal)}**)` : ''
-            
-            const insight = `Em **${fmtMonth(m, y)}**${excludeNote}, você registrou **${fmtBRL(totalIncome)}** em receitas e **${fmtBRL(totalExpense)}** em despesas consideradas, resultando em um ${balanceStr}.`
+            const topCatsStr = topCategories.slice(0, 5).map(c => `- **${c.name}**: ${fmtBRL(c.total)}`).join('\n')
+            const excludeNote = excluded > 0 ? ` (excluindo **${excludeCategory}**: ${fmtBRL(excluded)})` : ''
+            const insight = `Em **${fmtMonth(m, y)}**${excludeNote}, você teve **${fmtBRL(income)}** em receitas e **${fmtBRL(expense)}** em despesas, resultando em um ${balanceStr}.\n\n**Principais categorias:**\n${topCatsStr}`
 
             return {
               cardType: 'summary',
               found: true,
               period: fmtMonth(m, y),
-              totalIncome: Number(totalIncome.toFixed(2)),
-              totalExpense: Number(totalExpense.toFixed(2)),
+              totalIncome: Number(income.toFixed(2)),
+              totalExpense: Number(expense.toFixed(2)),
               balance: Number(balance.toFixed(2)),
-              excludedTotal: Number(excludedTotal.toFixed(2)),
-              transactionCount: txs.length,
+              excludedCategoryTotal: Number(excluded.toFixed(2)),
               topCategories,
               insight,
-              showCard: true
+              showCard: true,
             }
-          }
+          },
         } as any),
 
-        // ─── 2. Transações e Buscas Específicas ─────────────────────────────
+        /**
+         * Busca transações com filtros livres.
+         * O LLM escolhe os filtros corretos baseado na intenção do usuário.
+         */
         getTransactions: tool({
-          description: 'Busca lancamentos e transacoes filtrados por mês, ano, categoria, conta ou investimentos.',
+          description: `Busca lançamentos/transações com filtros flexíveis. 
+Use quando precisar de dados específicos como: gastos em uma categoria, item específico, conta, cartão, investimentos, ou qualquer busca por descrição.
+IMPORTANTE: Para buscas por palavra-chave (ex: "futebol", "netflix", "ifood"), use o campo "keyword".
+Para categorias do sistema (ex: "Alimentação", "Transporte"), use "categoryName".`,
           parameters: z.object({
-            month: z.number().min(1).max(12).optional(),
-            year: z.number().optional(),
-            categoryName: z.string().optional(),
-            accountName: z.string().optional(),
-            keyword: z.string().optional(),
-            isInvestment: z.boolean().optional().describe('Defina como true quando a pergunta for sobre investimentos, cofres, aportes ou reserva'),
-            onlyCreditCards: z.boolean().optional(),
-            onlyBankAccounts: z.boolean().optional(),
+            month: z.number().min(1).max(12).optional().describe('Mês (1-12). Default: mês atual'),
+            year: z.number().optional().describe('Ano. Default: ano atual'),
+            categoryName: z.string().optional().describe('Nome exato de uma categoria do sistema (ex: Alimentação, Transporte)'),
+            keyword: z.string().optional().describe('Palavra-chave para buscar na descrição das transações (ex: netflix, ifood, futebol, academia)'),
+            accountName: z.string().optional().describe('Nome de conta ou cartão para filtrar'),
+            isInvestment: z.boolean().optional().describe('True para buscar apenas transações de categorias de investimento ou cofres'),
+            onlyCreditCard: z.boolean().optional().describe('True para filtrar apenas transações de cartão de crédito'),
+            onlyBankAccount: z.boolean().optional().describe('True para filtrar apenas transações de conta corrente/poupança'),
+            expensesOnly: z.boolean().optional().describe('True para retornar apenas despesas'),
+            incomeOnly: z.boolean().optional().describe('True para retornar apenas receitas'),
           }),
-          execute: async (args: any) => {
-            const m = args.month ?? previousMonthContext ?? currentMonth
-            const y = args.year ?? currentYear
+          execute: async ({ month, year, categoryName, keyword, accountName, isInvestment, onlyCreditCard, onlyBankAccount, expensesOnly, incomeOnly }: any) => {
+            const m = month ?? cm
+            const y = year ?? cy
             const daysInMonth = new Date(y, m, 0).getDate()
-            const startDate = `${y}-${String(m).padStart(2,'0')}-01`
-            const endDate = `${y}-${String(m).padStart(2,'0')}-${String(daysInMonth).padStart(2,'0')}`
+            const start = `${y}-${String(m).padStart(2, '0')}-01`
+            const end = `${y}-${String(m).padStart(2, '0')}-${String(daysInMonth).padStart(2, '0')}`
 
             const { data: allTxs } = await supabase
               .from('transactions')
               .select('id, category_id, account_id, description, amount, type, date, status, ignore_in_cashflow')
-              .gte('date', startDate).lte('date', endDate)
+              .gte('date', start).lte('date', end)
               .order('date', { ascending: false })
 
-            let txs = allTxs || []
+            let txs = (allTxs || []) as any[]
 
-            // A) Filtro de Segurança do Fluxo de Caixa
-            txs = txs.filter((t: any) => {
+            // Filtro base de segurança
+            txs = txs.filter(t => {
               if (t.ignore_in_cashflow) return false
               if (t.type === 'transfer') return false
-              const descNorm = norm(t.description || '')
-              if (descNorm.includes('ajuste manual')) return false
+              const d = norm(t.description || '')
+              if (d.includes('ajuste manual')) return false
               return true
             })
 
-            // Detecta intenção de investimento caso não passada nos argumentos
-            const isInvestIntent = args.isInvestment || promptNorm.includes('investi') || promptNorm.includes('investimento') || promptNorm.includes('guardei') || promptNorm.includes('cofre') || promptNorm.includes('reserva')
-
-            // B) Filtro por Investimentos
-            if (isInvestIntent) {
-              txs = txs.filter((t: any) => {
-                const catObj = t.category_id ? categoryIdToNameMap[t.category_id] : null
-                const descNorm = norm(t.description || '')
-                const cnameNorm = catObj ? norm(catObj.name) : ''
-                return catObj?.isInvestment || cnameNorm.includes('renda fixa') || cnameNorm.includes('investimento') || descNorm.includes('aporte') || descNorm.includes('investimento') || descNorm.includes('reserva') || descNorm.includes('cofre')
-              })
-            } else {
-              // Filtro normal por Categoria
-              let targetCatName = args.categoryName || null
-              if (!targetCatName) {
-                for (const cName of categoriesList) {
-                  const cNorm = norm(cName)
-                  if (promptNorm.includes(cNorm) || cNorm.includes(promptNorm)) {
-                    targetCatName = cName
-                    break
-                  }
-                }
-              }
-              if (!targetCatName && previousCategoryContext && (promptNorm.includes('essas') || promptNorm.includes('esses') || promptNorm.includes('quais') || promptNorm.includes('detalha') || promptNorm.includes('outras despesas'))) {
-                targetCatName = previousCategoryContext
-              }
-
-              if (targetCatName) {
-                const catNorm = norm(targetCatName)
-                txs = txs.filter((t: any) => {
-                  const cname = norm(categoryResolver(t))
-                  const desc = norm(t.description || '')
-                  return cname.includes(catNorm) || catNorm.includes(cname) || desc.includes(catNorm)
-                })
-              }
-
-              if (args.keyword) {
-                const kwNorm = norm(args.keyword)
-                txs = txs.filter((t: any) => {
-                  const desc = norm(t.description || '')
-                  const cname = norm(categoryResolver(t))
-                  return desc.includes(kwNorm) || cname.includes(kwNorm)
-                })
-              }
-            }
-
-            if (args.accountName) {
-              const accNorm = norm(args.accountName)
-              txs = txs.filter((t: any) => {
-                const aname = norm(accountResolver(t).name)
-                return aname.includes(accNorm) || accNorm.includes(aname)
+            // Filtro por investimentos
+            if (isInvestment) {
+              txs = txs.filter(t => {
+                const meta = t.category_id ? categoryIdToMeta[t.category_id] : null
+                const d = norm(t.description || '')
+                return meta?.isInvestment || d.includes('aporte') || d.includes('investimento') || d.includes('reserva') || d.includes('cofre')
               })
             }
 
-            let totalIncome = 0
-            let totalExpense = 0
+            // Filtro por categoria
+            if (categoryName) {
+              const catN = norm(categoryName)
+              txs = txs.filter(t => {
+                const cat = norm(resolveCategory(t))
+                return cat.includes(catN) || catN.includes(cat)
+              })
+            }
 
-            for (const t of txs as any[]) {
+            // Filtro por palavra-chave (busca na descrição)
+            if (keyword) {
+              const kw = norm(keyword)
+              txs = txs.filter(t => {
+                const d = norm(t.description || '')
+                return d.includes(kw)
+              })
+            }
+
+            // Filtro por conta
+            if (accountName) {
+              const accN = norm(accountName)
+              txs = txs.filter(t => {
+                const acc = norm(resolveAccount(t).name)
+                return acc.includes(accN) || accN.includes(acc)
+              })
+            }
+
+            // Filtro por tipo de conta
+            if (onlyCreditCard) txs = txs.filter(t => resolveAccount(t).isCreditCard)
+            if (onlyBankAccount) txs = txs.filter(t => !resolveAccount(t).isCreditCard)
+            if (expensesOnly) txs = txs.filter(t => t.type === 'expense')
+            if (incomeOnly) txs = txs.filter(t => t.type === 'income')
+
+            let totalIncome = 0, totalExpense = 0
+            for (const t of txs) {
               const amt = Number(t.amount) || 0
               if (t.type === 'income') totalIncome += amt
               if (t.type === 'expense') totalExpense += amt
             }
 
+            const totalVal = totalExpense > 0 ? totalExpense : totalIncome
+            let filterLabel = ''
+            if (isInvestment) filterLabel = 'em investimentos/cofres'
+            else if (categoryName) filterLabel = `na categoria **${categoryName}**`
+            else if (keyword) filterLabel = `com "${keyword}" na descrição`
+            else if (accountName) filterLabel = `na conta/cartão **${accountName}**`
+            else filterLabel = 'no período'
+
             let insight = ''
             if (txs.length === 0) {
-              insight = isInvestIntent 
-                ? `Nenhum investimento ou aporte registrado em **${fmtMonth(m, y)}**.`
-                : `Nenhum lançamento localizado em **${fmtMonth(m, y)}**.`
-            } else if (isInvestIntent) {
-              insight = `Em **${fmtMonth(m, y)}**, você investiu/aportou um total de **${fmtBRL(totalExpense > 0 ? totalExpense : totalIncome)}**, distribuídos em **${txs.length} lançamento(s)**.`
+              insight = `Não encontrei nenhum lançamento ${filterLabel} em **${fmtMonth(m, y)}**.`
             } else {
-              const label = args.categoryName || previousCategoryContext || 'pesquisa'
-              insight = `Em **${fmtMonth(m, y)}**, você registrou **${fmtBRL(totalExpense > 0 ? totalExpense : totalIncome)}** (${label}), distribuídos em **${txs.length} lançamento(s)**.`
+              insight = `Em **${fmtMonth(m, y)}**, encontrei **${txs.length} lançamento(s)** ${filterLabel}, totalizando **${fmtBRL(totalVal)}**.`
             }
 
             return {
               cardType: 'search',
               found: txs.length > 0,
               period: fmtMonth(m, y),
-              categoryFilter: args.categoryName || (isInvestIntent ? 'Investimentos' : undefined),
-              accountFilter: args.accountName,
+              filters: { categoryName, keyword, accountName, isInvestment },
               totalIncome: Number(totalIncome.toFixed(2)),
               totalExpense: Number(totalExpense.toFixed(2)),
               transactionCount: txs.length,
-              transactions: txs.map((t: any) => {
-                const accInfo = accountResolver(t)
+              transactions: txs.slice(0, 50).map(t => {
+                const acc = resolveAccount(t)
                 return {
-                  description: t.description,
+                  description: t.description || '',
                   amount: Number(t.amount).toFixed(2),
                   type: t.type,
                   date: t.date,
-                  category: categoryResolver(t),
-                  account: accInfo.name,
-                  isCreditCard: accInfo.isCreditCard
+                  category: resolveCategory(t),
+                  account: acc.name,
+                  isCreditCard: acc.isCreditCard,
                 }
               }),
               insight,
-              showCard: true
+              showCard: txs.length > 0,
             }
-          }
+          },
         } as any),
 
-        // ─── 3. Planejamento do Mês Futuro (Aba /planned) ─────────────────
-        getPlannedTransactions: tool({
-          description: 'Obtem o planejamento de orcamento e despesas previstas para os proximos meses exatamente igual a aba /planned.',
+        /**
+         * Planejamento financeiro (igual à aba /planned)
+         */
+        getPlannedBudget: tool({
+          description: 'Obtém o planejamento orçamentário para um mês futuro, igual à aba de Planejamentos. Inclui custos fixos, variáveis estimados e receitas previstas.',
           parameters: z.object({
-            month: z.number().min(1).max(12).optional(),
-            year: z.number().optional(),
+            month: z.number().min(1).max(12).optional().describe('Mês. Default: próximo mês'),
+            year: z.number().optional().describe('Ano. Default: ano atual'),
           }),
-          execute: async (args: any) => {
-            let targetMonth = args.month ?? previousMonthContext
-            let targetYear = args.year
-            if (!targetMonth) {
-              targetMonth = currentMonth === 12 ? 1 : currentMonth + 1
-              targetYear = currentMonth === 12 ? currentYear + 1 : currentYear
-            }
-            if (!targetYear) targetYear = currentYear
+          execute: async ({ month, year }: any) => {
+            const nextM = cm === 12 ? 1 : cm + 1
+            const nextY = cm === 12 ? cy + 1 : cy
+            const targetMonth = month ?? nextM
+            const targetYear = year ?? (month ? cy : nextY)
 
             const daysInTarget = new Date(targetYear, targetMonth, 0).getDate()
-            const startDate = `${targetYear}-${String(targetMonth).padStart(2, '0')}-01`
-            const endDate = `${targetYear}-${String(targetMonth).padStart(2, '0')}-${String(daysInTarget).padStart(2, '0')}`
+            const start = `${targetYear}-${String(targetMonth).padStart(2, '0')}-01`
+            const end = `${targetYear}-${String(targetMonth).padStart(2, '0')}-${String(daysInTarget).padStart(2, '0')}`
 
-            // 1. Busca lançamentos cadastrados para o ciclo do próximo mês
             const { data: targetTxs } = await supabase
               .from('transactions')
-              .select('id, category_id, account_id, description, amount, type, date, status, is_recurring, ignore_in_cashflow')
-              .gte('date', startDate).lte('date', endDate)
-
-            let spentFixed = 0
-            let spentVariable = 0
-            let totalTargetIncome = 0
-            const fixedCategorySpentMap: Record<string, number> = {}
-            const variableCategorySpentMap: Record<string, number> = {}
+              .select('id, category_id, amount, type, is_recurring, ignore_in_cashflow')
+              .gte('date', start).lte('date', end)
 
             const fixedCatIds = new Set((categoriesData || []).filter((c: any) => c.is_fixed && !c.is_investment).map((c: any) => c.id))
+            let spentFixed = 0, spentVariable = 0, totalTargetIncome = 0
+            const fixedSpentMap: Record<string, number> = {}
+            const varSpentMap: Record<string, number> = {}
 
-            if (targetTxs) {
-              for (const t of targetTxs as any[]) {
-                if (t.ignore_in_cashflow || t.type === 'transfer') continue
-                const amt = Number(t.amount) || 0
-                const cname = categoryResolver(t)
-                if (t.type === 'income') {
-                  totalTargetIncome += amt
-                } else if (t.type === 'expense') {
-                  const isFix = Boolean(t.is_recurring) || Boolean(t.category_id && fixedCatIds.has(t.category_id))
-                  if (isFix) {
-                    spentFixed += amt
-                    fixedCategorySpentMap[cname] = (fixedCategorySpentMap[cname] || 0) + amt
-                  } else {
-                    spentVariable += amt
-                    variableCategorySpentMap[cname] = (variableCategorySpentMap[cname] || 0) + amt
-                  }
+            for (const t of (targetTxs || []) as any[]) {
+              if (t.ignore_in_cashflow || t.type === 'transfer') continue
+              const amt = Number(t.amount) || 0
+              const cname = resolveCategory(t)
+              if (t.type === 'income') {
+                totalTargetIncome += amt
+              } else if (t.type === 'expense') {
+                const isFix = Boolean(t.is_recurring) || (t.category_id && fixedCatIds.has(t.category_id))
+                if (isFix) {
+                  spentFixed += amt
+                  fixedSpentMap[cname] = (fixedSpentMap[cname] || 0) + amt
+                } else {
+                  spentVariable += amt
+                  varSpentMap[cname] = (varSpentMap[cname] || 0) + amt
                 }
               }
             }
 
-            // 2. Orçamentos base das categorias (budget_amount)
-            let plannedFixedBase = 0
-            let plannedVariableBase = 0
-            let plannedIncomeBase = 0
-            const fixedCategoryItems: { name: string; amount: number }[] = []
-            const variableCategoryItems: { name: string; amount: number }[] = []
+            let plannedFixedBase = 0, plannedVarBase = 0, plannedIncomeBase = 0
+            const fixedItems: { name: string; budget: number; projected: number }[] = []
+            const varItems: { name: string; budget: number; projected: number }[] = []
 
-            if (categoriesData) {
-              for (const c of categoriesData as any[]) {
-                const amt = Number(c.budget_amount) || 0
-                if (c.type === 'income') {
-                  plannedIncomeBase += amt
-                } else if (c.type === 'expense' && !c.is_investment) {
-                  const spentInCat = c.is_fixed ? (fixedCategorySpentMap[c.name] || 0) : (variableCategorySpentMap[c.name] || 0)
-                  const finalCatAmount = Math.max(amt, spentInCat)
-
-                  if (c.is_fixed) {
-                    plannedFixedBase += amt
-                    if (finalCatAmount > 0) fixedCategoryItems.push({ name: c.name, amount: finalCatAmount })
-                  } else {
-                    plannedVariableBase += amt
-                    if (finalCatAmount > 0) variableCategoryItems.push({ name: c.name, amount: finalCatAmount })
-                  }
+            for (const c of (categoriesData || []) as any[]) {
+              const budget = Number(c.budget_amount) || 0
+              if (c.type === 'income') {
+                plannedIncomeBase += budget
+              } else if (c.type === 'expense' && !c.is_investment) {
+                const spent = c.is_fixed ? (fixedSpentMap[c.name] || 0) : (varSpentMap[c.name] || 0)
+                const projected = Math.max(budget, spent)
+                if (c.is_fixed) {
+                  plannedFixedBase += budget
+                  if (projected > 0) fixedItems.push({ name: c.name, budget, projected })
+                } else {
+                  plannedVarBase += budget
+                  if (projected > 0) varItems.push({ name: c.name, budget, projected })
                 }
               }
             }
 
             const plannedFixed = Math.max(plannedFixedBase, spentFixed)
-            const plannedVariable = Math.max(plannedVariableBase, spentVariable)
+            const plannedVariable = Math.max(plannedVarBase, spentVariable)
             const plannedIncome = Math.max(plannedIncomeBase, totalTargetIncome)
+            const totalExpense = plannedFixed + plannedVariable
+            const projectedBalance = plannedIncome - totalExpense
 
-            const totalEstimatedExpense = plannedFixed + plannedVariable
-            const projectedBalance = plannedIncome - totalEstimatedExpense
-
-            const isDetailRequested = promptNorm.includes('detalha') || promptNorm.includes('detalhe') || promptNorm.includes('quais') || promptNorm.includes('item')
-
-            let insight = ''
-            if (isDetailRequested) {
-              const fixedLines = fixedCategoryItems.map(i => `- **${i.name}**: ${fmtBRL(i.amount)}`).join('\n')
-              const varLines = variableCategoryItems.map(i => `- **${i.name}**: ${fmtBRL(i.amount)}`).join('\n')
-
-              insight = `De acordo com a sua **Aba de Planejamento**, o detalhamento para **${fmtMonth(targetMonth, targetYear)}** é:\n\n` +
-                `### 📌 Custos Fixos (${fmtBRL(plannedFixed)}):\n${fixedLines || '- *Nenhum*'}\n\n` +
-                `### 💡 Custos Variáveis (${fmtBRL(plannedVariable)}):\n${varLines || '- *Nenhum*'}\n\n` +
-                `💰 **Receitas Previstas**: ${fmtBRL(plannedIncome)} | 🟢 **Saldo Projetado**: ${fmtBRL(projectedBalance)}`
-            } else {
-              insight = `De acordo com a sua **Aba de Planejamento**, o seu orçamento para **${fmtMonth(targetMonth, targetYear)}** está estimado em **${fmtBRL(totalEstimatedExpense)}** (**${fmtBRL(plannedFixed)}** em Custos Fixos + **${fmtBRL(plannedVariable)}** em Custos Variáveis).`
-            }
+            const fixedListStr = fixedItems.map(i => `- **${i.name}**: ${fmtBRL(i.projected)}`).join('\n') || '- *Nenhum custo fixo cadastrado*'
+            const varListStr = varItems.map(i => `- **${i.name}**: ${fmtBRL(i.projected)}`).join('\n') || '- *Nenhum custo variável orçado*'
+            const insight = `Para **${fmtMonth(targetMonth, targetYear)}**, o orçamento previsto é **${fmtBRL(totalExpense)}** em despesas.\n\n**📌 Custos Fixos (${fmtBRL(plannedFixed)}):**\n${fixedListStr}\n\n**💡 Custos Variáveis (${fmtBRL(plannedVariable)}):**\n${varListStr}\n\n💰 Receitas previstas: **${fmtBRL(plannedIncome)}** | Saldo projetado: **${fmtBRL(projectedBalance)}**`
 
             return {
               cardType: 'planning',
               found: true,
               period: fmtMonth(targetMonth, targetYear),
-              fixedBills: {
-                total: Number(plannedFixed.toFixed(2)),
-                items: fixedCategoryItems
-              },
-              variableProjections: {
-                total: Number(plannedVariable.toFixed(2)),
-                items: variableCategoryItems
-              },
-              totalEstimatedExpense: Number(totalEstimatedExpense.toFixed(2)),
+              fixedBills: { total: Number(plannedFixed.toFixed(2)), items: fixedItems },
+              variableProjections: { total: Number(plannedVariable.toFixed(2)), items: varItems },
+              totalEstimatedExpense: Number(totalExpense.toFixed(2)),
               expectedIncome: Number(plannedIncome.toFixed(2)),
               projectedBalance: Number(projectedBalance.toFixed(2)),
               insight,
-              showCard: true
+              showCard: true,
             }
-          }
+          },
         } as any),
 
-        // ─── 4. Saldos de Contas e Cofres de Investimentos ───────────────
-        getAccounts: tool({
-          description: 'Obtem os saldos atuais das contas bancarias, faturas de cartao e cofres de investimento do usuario.',
+        /**
+         * Saldos de contas e cofres
+         */
+        getAccountBalances: tool({
+          description: 'Obtém saldos calculados de todas as contas bancárias, cartões de crédito e cofres de investimento do usuário.',
           parameters: z.object({
-            accountName: z.string().optional(),
+            accountName: z.string().optional().describe('Filtrar por nome de conta específica'),
           }),
-          execute: async (args: any) => {
-            const { data: accounts } = await supabase.from('accounts').select('id, name, type, initial_balance, is_hidden')
+          execute: async ({ accountName }: any) => {
+            const { data: accounts } = await supabase
+              .from('accounts')
+              .select('id, name, type, initial_balance, is_hidden')
 
-            if (!accounts) return { cardType: 'accounts', found: false, insight: 'Nenhuma conta localizada.', showCard: false }
+            if (!accounts?.length) return { found: false, showCard: false }
 
-            const { data: allTxs } = await supabase
+            const { data: postedTxs } = await supabase
               .from('transactions')
-              .select('account_id, destination_account_id, type, amount, status')
+              .select('account_id, destination_account_id, type, amount')
               .eq('status', 'posted')
 
-            const { data: vaults } = await supabase.from('account_vaults').select('id, name, balance, target_amount')
+            const { data: vaults } = await supabase
+              .from('account_vaults')
+              .select('id, name, balance, target_amount')
 
-            const calculatedAccounts = accounts.map((acc: any) => {
-              let balance = Number(acc.initial_balance) || 0
-              if (allTxs) {
-                for (const t of allTxs as any[]) {
-                  const amt = Number(t.amount) || 0
-                  if (t.type === 'income' && t.account_id === acc.id) balance += amt
-                  if (t.type === 'expense' && t.account_id === acc.id) balance -= amt
-                  if (t.type === 'transfer') {
-                    if (t.account_id === acc.id) balance -= amt
-                    if (t.destination_account_id === acc.id) balance += amt
-                  }
-                }
+            const balanceMap: Record<string, number> = {}
+            for (const acc of accounts as any[]) {
+              balanceMap[acc.id] = Number(acc.initial_balance) || 0
+            }
+            for (const t of (postedTxs || []) as any[]) {
+              const amt = Number(t.amount) || 0
+              if (t.type === 'income' && t.account_id) balanceMap[t.account_id] = (balanceMap[t.account_id] || 0) + amt
+              if (t.type === 'expense' && t.account_id) balanceMap[t.account_id] = (balanceMap[t.account_id] || 0) - amt
+              if (t.type === 'transfer') {
+                if (t.account_id) balanceMap[t.account_id] = (balanceMap[t.account_id] || 0) - amt
+                if (t.destination_account_id) balanceMap[t.destination_account_id] = (balanceMap[t.destination_account_id] || 0) + amt
               }
-              return { id: acc.id, name: acc.name, type: acc.type, balance: Number(balance.toFixed(2)), isHidden: acc.is_hidden }
-            })
-
-            let filtered = calculatedAccounts
-            if (args.accountName) {
-              const q = norm(args.accountName)
-              filtered = calculatedAccounts.filter((a: any) => norm(a.name).includes(q))
             }
 
-            const totalLiquid = calculatedAccounts.reduce((s, a) => s + (a.type !== 'credit_card' ? a.balance : 0), 0)
-            const totalCreditDebt = calculatedAccounts.reduce((s, a) => s + (a.type === 'credit_card' ? Math.abs(a.balance) : 0), 0)
-            const totalVaults = (vaults || []).reduce((s, v) => s + (Number(v.balance) || 0), 0)
+            let accountsList = (accounts as any[]).map(acc => ({
+              id: acc.id,
+              name: acc.name,
+              type: acc.type,
+              balance: Number((balanceMap[acc.id] ?? Number(acc.initial_balance) ?? 0).toFixed(2)),
+              isCreditCard: acc.type === 'credit_card',
+            }))
 
-            const insight = `Você possui **${filtered.length}** conta(s)/cartão(ões). Saldo líquido total: **${fmtBRL(totalLiquid)}** | Faturas de cartão: **${fmtBRL(totalCreditDebt)}** | Cofres/Investimentos: **${fmtBRL(totalVaults)}**.`
+            if (accountName) {
+              const q = norm(accountName)
+              accountsList = accountsList.filter(a => norm(a.name).includes(q))
+            }
+
+            const totalLiquid = accountsList.filter(a => !a.isCreditCard).reduce((s, a) => s + a.balance, 0)
+            const totalCreditDebt = accountsList.filter(a => a.isCreditCard).reduce((s, a) => s + Math.abs(a.balance), 0)
+            const totalVaults = (vaults || []).reduce((s, v) => s + (Number(v.balance) || 0), 0)
+            const accListStr = accountsList.map(a => `- **${a.name}**: ${fmtBRL(a.balance)}`).join('\n')
+            const insight = `Aqui está o panorama dos seus saldos:\n\n${accListStr}\n\n💰 Saldo líquido total: **${fmtBRL(totalLiquid)}** | Faturas de cartão: **${fmtBRL(totalCreditDebt)}** | Cofres/Investimentos: **${fmtBRL(totalVaults)}**`
 
             return {
               cardType: 'accounts',
@@ -551,15 +519,15 @@ REGRAS OBRIGATÓRIAS:
               totalCreditDebt: Number(totalCreditDebt.toFixed(2)),
               totalVaults: Number(totalVaults.toFixed(2)),
               netTotal: Number((totalLiquid + totalVaults).toFixed(2)),
-              accountsList: filtered,
+              accountsList,
               vaultsList: vaults || [],
               insight,
-              showCard: true
+              showCard: true,
             }
-          }
+          },
         } as any),
-
       },
+
       onError: (err: any) => {
         console.error('[CHAT API] Stream error:', err)
       },

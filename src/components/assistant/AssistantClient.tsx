@@ -383,19 +383,21 @@ function MessageBubble({ message, isLast, isLoading }: { message: UIMessage; isL
     return state === 'call' || state === 'partial-call' || state === 'input-streaming'
   })
 
-  // Find any completed tool result
-  const completedToolPart = toolParts.find((p: any) => {
+  // Find the LAST completed tool result (show the most relevant card)
+  const completedToolParts = toolParts.filter((p: any) => {
     const inv = p.toolInvocation || p
     const state = inv.state || p.state
     return state === 'result' || state === 'output-available' || inv.result !== undefined || p.output !== undefined
   })
-  const toolOutput = completedToolPart
-    ? (completedToolPart.toolInvocation?.result ?? completedToolPart.result ?? completedToolPart.output ?? null)
+  const lastCompletedTool = completedToolParts[completedToolParts.length - 1] ?? null
+  const toolOutput = lastCompletedTool
+    ? (lastCompletedTool.toolInvocation?.result ?? lastCompletedTool.result ?? lastCompletedTool.output ?? null)
     : null
 
-  // The AI insight text — either from model text stream OR from tool's insight field (server-generated)
-  const insightText = contentText.trim() || (toolOutput?.insight as string) || ''
-  const isLoadingInsight = isThisBubbleLoading && toolOutput && !insightText && !isExecutingTool
+  // The AI text from LLM stream — primary display text
+  const insightText = contentText.trim() || (toolOutput?.insight as string | undefined) || ''
+  // Show loading spinner only while streaming has a pending tool state but no text yet
+  const isLoadingInsight = isThisBubbleLoading && (isExecutingTool || (lastCompletedTool && !insightText))
 
   return (
     <motion.div
