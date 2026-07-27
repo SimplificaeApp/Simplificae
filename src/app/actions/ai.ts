@@ -58,7 +58,7 @@ export async function parseNaturalLanguageTransaction(
 
     // Generate structured data using Gemini Flash
     const { object } = await generateObject({
-      model: google('gemini-flash-latest'),
+      model: google('gemini-3.5-flash-lite'),
       schema: TransactionSchema,
       prompt: prompt,
     })

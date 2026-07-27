@@ -1,3 +1,5 @@
+'use server'
+
 import { createClient } from '@/lib/supabase/server'
 import { google } from '@ai-sdk/google'
 import { generateObject } from 'ai'
@@ -14,8 +16,16 @@ const InsightsSchema = z.object({
 
 export type FinancialInsight = z.infer<typeof InsightsSchema>['insights'][number]
 
-export async function getFinancialInsights(): Promise<FinancialInsight[]> {
+let cachedInsights: FinancialInsight[] | null = null
+let insightsCacheTime = 0
+
+export async function getFinancialInsights(forceRefresh: boolean = false): Promise<FinancialInsight[]> {
   try {
+    // Retorna do cache se tiver menos de 5 minutos e não for um refresh forçado
+    if (!forceRefresh && cachedInsights && Date.now() - insightsCacheTime < 5 * 60 * 1000) {
+      return cachedInsights
+    }
+
     const supabase = await createClient()
 
     const now = new Date()
@@ -94,7 +104,7 @@ ${catChanges.length > 0 ? catChanges.join('\n') : 'Dados insuficientes para comp
     `.trim()
 
     const { object } = await generateObject({
-      model: google('gemini-flash-latest'),
+      model: google('gemini-3.5-flash-lite'),
       schema: InsightsSchema,
       prompt: `Você é um analista financeiro pessoal. Analise os dados abaixo e gere exatamente 4 insights financeiros úteis, práticos e personalizados para o usuário. Varie os tipos entre warning, success, tip e alert. Seja específico com números quando possível. Responda em português do Brasil.
 
@@ -102,6 +112,9 @@ ${summary}
 
 Gere 4 insights variados que realmente agreguem valor ao usuário.`,
     })
+
+    cachedInsights = object.insights
+    insightsCacheTime = Date.now()
 
     return object.insights
 

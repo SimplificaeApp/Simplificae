@@ -8,6 +8,7 @@ import { toast } from 'sonner'
 import { Modal } from '@/components/ui/Modal'
 import { TransactionForm } from '@/components/transactions/TransactionForm'
 import Link from 'next/link'
+import { usePathname } from 'next/navigation'
 
 export function AiFloatingButton({
   workspaceId,
@@ -26,6 +27,7 @@ export function AiFloatingButton({
   const [isTxModalOpen, setIsTxModalOpen] = useState(false)
   const [aiPreFillData, setAiPreFillData] = useState<any>(null)
   const inputRef = useRef<HTMLInputElement>(null)
+  const pathname = usePathname()
 
   // Focus input when modal opens
   useEffect(() => {
@@ -69,6 +71,8 @@ export function AiFloatingButton({
     }
     r.start()
   }
+
+  if (pathname === '/assistant') return null
 
   return (
     <>
@@ -138,7 +142,7 @@ export function AiFloatingButton({
                     value={aiInput}
                     onChange={e => setAiInput(e.target.value)}
                     onKeyDown={e => e.key === 'Enter' && handleAiSubmit()}
-                    className="flex-1 bg-transparent text-sm font-medium text-slate-700 placeholder:text-slate-400 focus:outline-none py-1.5"
+                    className="flex-1 min-w-0 bg-transparent text-sm font-medium text-slate-700 placeholder:text-slate-400 focus:outline-none py-1.5"
                   />
                   
                   <button 
