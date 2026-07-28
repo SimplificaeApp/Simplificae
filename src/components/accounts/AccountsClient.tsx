@@ -325,19 +325,19 @@ export function AccountsClient({
 
       {/* Account Creation Modal */}
       <Modal isOpen={isAccountModalOpen} onClose={() => setIsAccountModalOpen(false)} title="Nova Conta">
-        <AccountForm workspaceId={workspaceId!} onSuccess={() => setIsAccountModalOpen(false)} />
+        <AccountForm workspaceId={workspaceId!} onSuccess={() => { setIsAccountModalOpen(false); invalidateData(); }} />
       </Modal>
 
       {/* Account Meta Edit Modal */}
       <Modal isOpen={isEditAccMetaModalOpen} onClose={() => setIsEditAccMetaModalOpen(false)} title="Editar Conta">
         {editAccMetaTarget && (
-          <AccountForm workspaceId={workspaceId!} initialData={editAccMetaTarget} onSuccess={() => setIsEditAccMetaModalOpen(false)} />
+          <AccountForm workspaceId={workspaceId!} initialData={editAccMetaTarget} onSuccess={() => { setIsEditAccMetaModalOpen(false); invalidateData(); }} />
         )}
       </Modal>
 
       {/* Vault Creation Modal */}
       <Modal isOpen={isVaultModalOpen} onClose={() => setIsVaultModalOpen(false)} title="Novo Cofrinho">
-        {selectedAccountId && <VaultForm accountId={selectedAccountId} onSuccess={() => setIsVaultModalOpen(false)} />}
+        {selectedAccountId && <VaultForm accountId={selectedAccountId} onSuccess={() => { setIsVaultModalOpen(false); invalidateData(); }} />}
       </Modal>
 
       {/* Vault Action (Deposit/Withdraw) Modal */}
@@ -351,7 +351,7 @@ export function AccountsClient({
             vaultId={vaultActionState.id}
             actionType={vaultActionState.type}
             categories={categories}
-            onSuccess={() => setIsVaultActionModalOpen(false)}
+            onSuccess={() => { setIsVaultActionModalOpen(false); invalidateData(); }}
           />
         )}
       </Modal>
@@ -384,7 +384,7 @@ export function AccountsClient({
       {/* Vault Edit Modal */}
       <Modal isOpen={isEditVaultModalOpen} onClose={() => setIsEditVaultModalOpen(false)} title="Editar Cofrinho">
         {editVaultTarget && (
-          <VaultForm accountId={editVaultTarget.account_id} initialData={editVaultTarget} onSuccess={() => setIsEditVaultModalOpen(false)} />
+          <VaultForm accountId={editVaultTarget.account_id} initialData={editVaultTarget} onSuccess={() => { setIsEditVaultModalOpen(false); invalidateData(); }} />
         )}
       </Modal>
 

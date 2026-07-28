@@ -9,6 +9,7 @@ import { motion } from 'framer-motion'
 import { deleteCategory } from '@/app/actions/categories'
 import { updatePrivacyPin, updateWorkspaceTurnoverDay } from '@/app/actions/settings'
 import { toast } from 'sonner'
+import { useInvalidateFinancialData } from '@/hooks/useFinancialData'
 
 type Category = { 
   id: string
@@ -34,6 +35,7 @@ export function SettingsClient({
   categories: Category[]
   initialPin?: string
 }) {
+  const invalidateData = useInvalidateFinancialData()
   const [activeTab, setActiveTab] = useState<'categories' | 'preferences' | 'privacy'>('categories')
   const [isModalOpen, setIsModalOpen] = useState(false)
   const [editingCategory, setEditingCategory] = useState<Category | null>(null)
@@ -62,7 +64,10 @@ export function SettingsClient({
     startTransition(async () => {
       const res = await updateWorkspaceTurnoverDay(workspaceId, Number(turnoverDay))
       if (res?.error) toast.error(res.error)
-      else toast.success(res.success)
+      else {
+        toast.success(res.success)
+        invalidateData()
+      }
     })
   }
 
@@ -302,7 +307,10 @@ export function SettingsClient({
             action={async (formData) => {
               const res = await updatePrivacyPin(null, formData)
               if (res?.error) toast.error(res.error)
-              else toast.success(res.success)
+              else {
+                toast.success(res.success)
+                invalidateData()
+              }
             }}
             className="flex flex-col gap-4 max-w-xl"
           >
@@ -348,6 +356,7 @@ export function SettingsClient({
           onSuccess={() => {
             setIsModalOpen(false)
             setEditingCategory(null)
+            invalidateData()
           }} 
         />
       </Modal>
@@ -391,7 +400,10 @@ export function SettingsClient({
                   startTransition(async () => {
                     const res = await deleteCategory(targetId)
                     if (res?.error) toast.error(res.error)
-                    else toast.success(res.success)
+                    else {
+                      toast.success(res.success)
+                      invalidateData()
+                    }
                   })
                 }}
                 className="px-4 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-bold transition-all text-xs shadow-md disabled:opacity-70 flex items-center gap-1.5 active:scale-95"

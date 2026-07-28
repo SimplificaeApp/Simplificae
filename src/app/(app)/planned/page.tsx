@@ -9,24 +9,10 @@ export default async function PlannedPage() {
 
   const [
     { data: { user } },
-    { data: workspaces },
-    txRes,
-    catRes,
-    accRes
+    { data: workspaces }
   ] = await Promise.all([
     supabase.auth.getUser(),
-    supabase.from('workspaces').select('id, name, type, month_turnover_day').order('created_at', { ascending: true }),
-    supabase
-      .from('transactions')
-      .select('*, category:categories(*), account:accounts!transactions_account_id_fkey(id, name, color, icon, type, closing_day, due_day)')
-      .order('date', { ascending: true }),
-    supabase
-      .from('categories')
-      .select('*')
-      .order('name', { ascending: true }),
-    supabase
-      .from('accounts')
-      .select('*')
+    supabase.from('workspaces').select('id, name, type, month_turnover_day').order('created_at', { ascending: true })
   ])
 
   if (!user) {
@@ -34,16 +20,13 @@ export default async function PlannedPage() {
   }
 
   const currentWorkspace = workspaces && workspaces.length > 0 ? workspaces[0] : null
-  const transactions = txRes.data || []
-  const categories = catRes.data || []
-  const accounts = accRes.data || []
 
   return (
     <PlannedClient 
       user={user} 
-      transactions={transactions}
-      categories={categories}
-      accounts={accounts}
+      transactions={[]}
+      categories={[]}
+      accounts={[]}
       workspaces={workspaces || []}
       workspace={currentWorkspace}
     />

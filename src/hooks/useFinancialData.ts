@@ -41,7 +41,6 @@ export function useTransactionsQuery(initialData?: any[]) {
       return data || []
     },
     initialData: initialData && initialData.length > 0 ? initialData : undefined,
-    staleTime: Infinity,
   })
 }
 
@@ -73,7 +72,6 @@ export function useAccountsQuery(initialData?: any[]) {
       return data || []
     },
     initialData: initialData && initialData.length > 0 ? initialData : undefined,
-    staleTime: Infinity,
   })
 }
 
@@ -105,7 +103,6 @@ export function useCategoriesQuery(initialData?: any[]) {
       return data || []
     },
     initialData: initialData && initialData.length > 0 ? initialData : undefined,
-    staleTime: Infinity,
   })
 }
 

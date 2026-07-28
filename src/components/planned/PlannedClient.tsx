@@ -35,6 +35,7 @@ import { payTransactionNew, unpayTransaction, deleteTransaction } from '@/app/ac
 import { updateWorkspaceTurnoverDay } from '@/app/actions/settings'
 import { getCreditCardDueDate } from '@/lib/creditCardUtils'
 import { toast } from 'sonner'
+import { useInvalidateFinancialData } from '@/hooks/useFinancialData'
 
 // Dynamic load for ECharts
 const ReactECharts = dynamic(() => import('echarts-for-react'), {
@@ -98,6 +99,8 @@ export function PlannedClient({
 
   const [viewMode, setViewMode] = useState<'overview' | 'fixed' | 'categories' | 'transactions'>('overview')
   const [pendingFilter, setPendingFilter] = useState<'all' | 'expense' | 'income'>('all')
+
+  const invalidateData = useInvalidateFinancialData()
 
   // Modals & Popovers
   const [isTxModalOpen, setIsTxModalOpen] = useState(false)
@@ -841,6 +844,7 @@ export function PlannedClient({
       if (res?.error) toast.error(res.error)
       else {
         toast.success(res.success)
+        invalidateData()
         setIsTurnoverModalOpen(false)
       }
     })
@@ -858,6 +862,7 @@ export function PlannedClient({
           setLocalTransactions(transactions) // Revert on failure
         } else {
           toast.success(res.success)
+          invalidateData()
         }
       } catch (err) {
         toast.error("Erro ao processar pagamento.")
@@ -878,6 +883,7 @@ export function PlannedClient({
           setLocalTransactions(transactions) // Revert on failure
         } else {
           toast.success(res.success)
+          invalidateData()
         }
       } catch (err) {
         toast.error("Erro ao desmarcar pagamento.")
@@ -894,7 +900,10 @@ export function PlannedClient({
           startTransition(async () => {
             const res = await deleteTransaction(id)
             if (res?.error) toast.error(res.error)
-            else toast.success(res.success)
+            else {
+              toast.success(res.success)
+              invalidateData()
+            }
           })
         }
       },
@@ -2004,6 +2013,7 @@ export function PlannedClient({
           onSuccess={() => {
             setIsTxModalOpen(false)
             setEditingTx(null)
+            invalidateData()
           }}
         />
       </Modal>
@@ -2027,6 +2037,7 @@ export function PlannedClient({
           onSuccess={() => {
             setIsCatModalOpen(false)
             setEditingCat(null)
+            invalidateData()
           }}
         />
       </Modal>
