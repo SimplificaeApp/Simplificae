@@ -12,19 +12,23 @@ import { deleteAccount, editAccountBalance, toggleAccountHidden } from '@/app/ac
 import { deleteVault, editVaultBalance, toggleVaultHidden } from '@/app/actions/vaults'
 import { toast } from 'sonner'
 import { usePrivacy } from '@/components/providers/PrivacyProvider'
+import { useAccountsQuery, useInvalidateFinancialData } from '@/hooks/useFinancialData'
 
 type Vault = { id: string; name: string; target_amount: number | null; balance: number; icon?: string; color?: string; account_id: string }
 type Account = { id: string; name: string; type: string; initial_balance: number; icon?: string; color?: string; account_vaults?: Vault[] }
 
 export function AccountsClient({
   workspaceId,
-  accounts,
+  accounts: initialAccounts,
   categories = []
 }: {
   workspaceId?: string
   accounts: Account[]
   categories?: any[]
 }) {
+  const { data: cachedAccounts } = useAccountsQuery(initialAccounts)
+  const invalidateData = useInvalidateFinancialData()
+  const accounts = cachedAccounts || initialAccounts
   const [isAccountModalOpen, setIsAccountModalOpen] = useState(false)
   const [isVaultModalOpen, setIsVaultModalOpen] = useState(false)
   const [selectedAccountId, setSelectedAccountId] = useState<string | null>(null)
@@ -65,7 +69,10 @@ export function AccountsClient({
           startTransition(async () => {
             const res = await deleteAccount(id)
             if (res?.error) toast.error(res.error)
-            else toast.success(res.success)
+            else {
+              toast.success(res.success)
+              invalidateData()
+            }
           })
         }
       },
@@ -82,7 +89,10 @@ export function AccountsClient({
           startTransition(async () => {
             const res = await deleteVault(id)
             if (res?.error) toast.error(res.error)
-            else toast.success(res.success)
+            else {
+              toast.success(res.success)
+              invalidateData()
+            }
           })
         }
       },
@@ -95,6 +105,7 @@ export function AccountsClient({
     if (res?.error) toast.error(res.error)
     else {
       toast.success(res.success)
+      invalidateData()
       setIsEditAccModalOpen(false)
     }
   }
@@ -223,7 +234,7 @@ export function AccountsClient({
 
                 {acc.account_vaults && acc.account_vaults.length > 0 ? (
                   <div className="flex flex-col gap-2">
-                    {acc.account_vaults.map(vault => (
+                    {acc.account_vaults.map((vault: Vault) => (
                       <div key={vault.id} className="flex flex-col bg-white border border-slate-100 rounded-xl p-3 shadow-sm hover:border-emerald-100 transition-colors">
                         {/* Vault top row: icon + name + action buttons */}
                         <div className="flex justify-between items-center gap-2 mb-2">

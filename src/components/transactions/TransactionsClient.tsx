@@ -14,6 +14,7 @@ import { TransactionForm } from './TransactionForm'
 import { deleteTransaction, markAsPosted, unpayTransaction } from '@/app/actions/transactions'
 import { getCreditCardCycles } from '@/lib/creditCardUtils'
 import { toast } from 'sonner'
+import { useTransactionsQuery, useCategoriesQuery, useAccountsQuery, useInvalidateFinancialData } from '@/hooks/useFinancialData'
 
 type Transaction = {
   id: string
@@ -269,15 +270,24 @@ function TransactionRow({
 
 export function TransactionsClient({
   workspaceId,
-  transactions,
-  categories,
-  accounts
+  transactions: initialTransactions,
+  categories: initialCategories,
+  accounts: initialAccounts
 }: {
   workspaceId: string
   transactions: Transaction[]
   categories: Category[]
   accounts: Account[]
 }) {
+  const { data: cachedTransactions } = useTransactionsQuery(initialTransactions)
+  const { data: cachedCategories } = useCategoriesQuery(initialCategories)
+  const { data: cachedAccounts } = useAccountsQuery(initialAccounts)
+  const invalidateData = useInvalidateFinancialData()
+
+  const transactions = cachedTransactions || initialTransactions
+  const categories = cachedCategories || initialCategories
+  const accounts = cachedAccounts || initialAccounts
+
   const [isTxModalOpen, setIsTxModalOpen] = useState(false)
   const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null)
   
@@ -353,7 +363,10 @@ export function TransactionsClient({
           startTransition(async () => {
             const res = await deleteTransaction(id)
             if (res?.error) toast.error(res.error)
-            else toast.success('Transação excluída!')
+            else {
+              toast.success('Transação excluída!')
+              invalidateData()
+            }
           })
         }
       },
@@ -365,7 +378,10 @@ export function TransactionsClient({
     startTransition(async () => {
       const res = await markAsPosted(id)
       if (res?.error) toast.error(res.error)
-      else toast.success(res.success || 'Transação marcada como paga!')
+      else {
+        toast.success(res.success || 'Transação marcada como paga!')
+        invalidateData()
+      }
     })
   }
 
@@ -373,7 +389,10 @@ export function TransactionsClient({
     startTransition(async () => {
       const res = await unpayTransaction(id)
       if (res?.error) toast.error(res.error)
-      else toast.success(res.success || 'Transação desmarcada!')
+      else {
+        toast.success(res.success || 'Transação desmarcada!')
+        invalidateData()
+      }
     })
   }
 

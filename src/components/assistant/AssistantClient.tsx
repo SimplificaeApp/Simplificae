@@ -17,6 +17,7 @@ import type { FinancialInsight } from '@/app/actions/insights'
 import type { UIMessage } from 'ai'
 import { toast } from 'sonner'
 import { Modal } from '@/components/ui/Modal'
+import { useInvalidateFinancialData } from '@/hooks/useFinancialData'
 
 // ──────────────────────────────────────────────
 // Insight Card
@@ -494,10 +495,14 @@ export function AssistantClient() {
     transport: new DefaultChatTransport({ api: '/api/chat' }),
     maxSteps: 5,
   } as any)
+  const invalidateData = useInvalidateFinancialData()
 
   useEffect(() => {
     console.log('[CLIENT ASSISTANT] Status:', status, 'Messages count:', messages.length, 'Latest message:', messages[messages.length - 1])
-  }, [messages, status])
+    if (status === 'ready') {
+      invalidateData()
+    }
+  }, [messages, status, invalidateData])
 
   const isLoading = status === 'streaming' || status === 'submitted'
 

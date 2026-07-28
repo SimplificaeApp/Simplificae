@@ -18,6 +18,8 @@ export const metadata: Metadata = {
   description: 'Seu copiloto financeiro inteligente.',
 }
 
+import { QueryProvider } from '@/components/providers/QueryProvider';
+
 export default function RootLayout({
   children,
 }: Readonly<{
@@ -28,12 +30,14 @@ export default function RootLayout({
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >
-        {children}
-        <Toaster 
-          theme="light" 
-          position="top-right" 
-          richColors 
-        />
+        <QueryProvider>
+          {children}
+          <Toaster 
+            theme="light" 
+            position="top-right" 
+            richColors 
+          />
+        </QueryProvider>
       </body>
     </html>
   );
