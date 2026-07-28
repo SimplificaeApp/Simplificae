@@ -572,8 +572,8 @@ export function AssistantClient() {
               {insights.length > 0 && (
                 <button 
                   onClick={handleGenerateInsights}
-                  disabled={isInsightsLoading}
-                  className="p-1.5 hover:bg-slate-100 rounded-md transition-colors text-slate-400 hover:text-violet-600"
+                  disabled={isInsightsLoading || isOffline}
+                  className="p-1.5 hover:bg-slate-100 rounded-md transition-colors text-slate-400 hover:text-violet-600 disabled:opacity-50 disabled:cursor-not-allowed"
                   title="Atualizar insights"
                 >
                   <Loader2 className={`w-3.5 h-3.5 ${isInsightsLoading ? 'animate-spin' : ''}`} />
@@ -600,7 +600,8 @@ export function AssistantClient() {
               <p className="text-xs text-slate-400 mb-4 px-2">Descubra dicas e alertas sobre suas finanças com IA.</p>
               <button
                 onClick={handleGenerateInsights}
-                className="bg-violet-100 hover:bg-violet-200 text-violet-700 text-xs font-bold px-4 py-2 rounded-xl transition-colors"
+                disabled={isOffline}
+                className="bg-violet-100 hover:bg-violet-200 text-violet-700 text-xs font-bold px-4 py-2 rounded-xl transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 Ativar Radar
               </button>
@@ -672,7 +673,8 @@ export function AssistantClient() {
                   <button
                     key={text}
                     onClick={() => { sendMessage({ text }) }}
-                    className="flex items-center gap-2 px-4 py-2.5 bg-white border border-slate-200/80 rounded-full hover:border-violet-300 hover:bg-violet-50 transition-all text-[13px] font-medium text-slate-600 hover:text-violet-700 shadow-[0_2px_10px_rgb(0,0,0,0.02)]"
+                    disabled={isOffline || isLoading}
+                    className="flex items-center gap-2 px-4 py-2.5 bg-white border border-slate-200/80 rounded-full hover:border-violet-300 hover:bg-violet-50 transition-all text-[13px] font-medium text-slate-600 hover:text-violet-700 shadow-[0_2px_10px_rgb(0,0,0,0.02)] disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-white disabled:hover:border-slate-200"
                   >
                     <span className="shrink-0">{icon}</span>
                     <span className="truncate max-w-[200px]">{text}</span>
@@ -779,8 +781,8 @@ export function AssistantClient() {
               {insights.length > 0 && (
                 <button 
                   onClick={handleGenerateInsights}
-                  disabled={isInsightsLoading}
-                  className="p-1.5 hover:bg-slate-100 rounded-md transition-colors text-slate-400 hover:text-violet-600"
+                  disabled={isInsightsLoading || isOffline}
+                  className="p-1.5 hover:bg-slate-100 rounded-md transition-colors text-slate-400 hover:text-violet-600 disabled:opacity-50 disabled:cursor-not-allowed"
                   title="Atualizar insights"
                 >
                   <Loader2 className={`w-3.5 h-3.5 ${isInsightsLoading ? 'animate-spin' : ''}`} />

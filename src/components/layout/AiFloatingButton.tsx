@@ -23,6 +23,21 @@ export function AiFloatingButton({
   const [aiInput, setAiInput] = useState('')
   const [isAiLoading, setIsAiLoading] = useState(false)
   const [isListening, setIsListening] = useState(false)
+  const [isOffline, setIsOffline] = useState(false)
+  
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      setIsOffline(!navigator.onLine)
+      const handleOnline = () => setIsOffline(false)
+      const handleOffline = () => { setIsOffline(true); setIsOpen(false); }
+      window.addEventListener('online', handleOnline)
+      window.addEventListener('offline', handleOffline)
+      return () => {
+        window.removeEventListener('online', handleOnline)
+        window.removeEventListener('offline', handleOffline)
+      }
+    }
+  }, [])
   
   const [isTxModalOpen, setIsTxModalOpen] = useState(false)
   const [aiPreFillData, setAiPreFillData] = useState<any>(null)
@@ -72,7 +87,7 @@ export function AiFloatingButton({
     r.start()
   }
 
-  if (pathname === '/assistant') return null
+  if (pathname === '/assistant' || isOffline) return null
 
   return (
     <>

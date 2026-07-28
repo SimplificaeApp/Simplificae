@@ -248,6 +248,25 @@ export function TransactionForm({
            }
            return [fakeTx, ...old]
          })
+
+         // Update account balances optimistically
+         const parsedAmount = payload.amount ? Number(payload.amount.toString().replace('.', '').replace(',', '.')) : 0;
+         if (parsedAmount > 0 && payload.status === 'posted') {
+           queryClient.setQueryData(QUERY_KEYS.accounts, (oldAccounts: any) => {
+             if (!oldAccounts) return oldAccounts;
+             return oldAccounts.map((acc: any) => {
+               let newBalance = acc.initial_balance || 0;
+               if (acc.id === payload.account_id) {
+                 if (payload.type === 'expense' || payload.type === 'transfer') newBalance -= parsedAmount;
+                 if (payload.type === 'income') newBalance += parsedAmount;
+               }
+               if (payload.type === 'transfer' && acc.id === payload.destination_account_id) {
+                 newBalance += parsedAmount;
+               }
+               return { ...acc, initial_balance: newBalance };
+             });
+           });
+         }
        }
        
        if (onSuccess) onSuccess()
