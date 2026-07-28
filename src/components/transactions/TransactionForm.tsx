@@ -153,6 +153,8 @@ function CustomSelect({
   )
 }
 
+import { enqueueMutation } from '@/lib/offlineSync'
+
 type State = { error?: string; success?: string }
 const initialState: State = {}
 
@@ -169,7 +171,9 @@ export function TransactionForm({
 }: TransactionFormProps) {
   const formRef = useRef<HTMLFormElement>(null)
   const actionToUse = initialData?.id ? updateTransaction.bind(null, initialData.id) : createTransaction
-  const [state, formAction, pending] = useActionState(actionToUse, initialState)
+  
+  const [isPendingLocal, setIsPendingLocal] = useState(false)
+  const pending = isPendingLocal
   
   const [type, setType] = useState<'expense' | 'income' | 'transfer'>(initialData?.type || defaultType)
   const [amount, setAmount] = useState(() => {
@@ -189,6 +193,7 @@ export function TransactionForm({
   const [isIndefinite, setIsIndefinite] = useState(true)
 
   const [updateScope, setUpdateScope] = useState<'single' | 'future'>('single')
+  const [localError, setLocalError] = useState<string | null>(null)
   
   const groupedAccountOptions = useMemo(() => {
     const bankAccs = accounts
@@ -209,13 +214,50 @@ export function TransactionForm({
   const router = useRouter()
   const invalidateData = useInvalidateFinancialData()
 
-  useEffect(() => {
-    if (state.success) {
-      invalidateData()
-      router.refresh()
-      if (onSuccess) onSuccess()
+  const customAction = async (formData: FormData) => {
+    setIsPendingLocal(true)
+    setLocalError(null)
+    const payload = Object.fromEntries(formData.entries())
+    
+    // Check if offline
+    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+       await enqueueMutation({
+          actionType: initialData?.id ? 'UPDATE_TRANSACTION' : 'CREATE_TRANSACTION',
+          payload: { ...payload, id: initialData?.id }
+       })
+       toast.info('Você está offline. Lançamento salvo localmente e será sincronizado depois.')
+       invalidateData() 
+       router.refresh()
+       if (onSuccess) onSuccess()
+       setIsPendingLocal(false)
+       return
     }
-  }, [state.success, onSuccess, router, invalidateData])
+
+    try {
+      const res = await actionToUse({}, formData)
+      if (res?.error) {
+         setLocalError(res.error)
+      } else {
+         invalidateData()
+         router.refresh()
+         if (onSuccess) onSuccess()
+      }
+    } catch (err: any) {
+      if (err.message && (err.message.includes('fetch') || err.message.includes('Network'))) {
+        await enqueueMutation({
+           actionType: initialData?.id ? 'UPDATE_TRANSACTION' : 'CREATE_TRANSACTION',
+           payload: { ...payload, id: initialData?.id }
+        })
+        toast.info('Falha na conexão. Lançamento salvo offline e será sincronizado depois.')
+        invalidateData() 
+        router.refresh()
+        if (onSuccess) onSuccess()
+      } else {
+        setLocalError('Erro ao salvar transação.')
+      }
+    }
+    setIsPendingLocal(false)
+  }
 
   const executeDelete = (scope: 'single' | 'future') => {
     if (!initialData) return
@@ -302,7 +344,7 @@ export function TransactionForm({
   }
 
   return (
-    <form ref={formRef} onSubmit={handleFormSubmit} action={formAction} className="flex flex-col gap-4">
+    <form ref={formRef} onSubmit={handleFormSubmit} action={customAction} className="flex flex-col gap-4">
       <input type="hidden" name="workspace_id" value={workspaceId} />
       <input type="hidden" name="type" value={type} />
       <input type="hidden" name="status" value={isPlanningMode ? 'pending' : (isPlanned ? 'pending' : 'posted')} />
@@ -325,9 +367,9 @@ export function TransactionForm({
         value={freqMode === 'installment' ? installments : 1} 
       />
 
-      {state.error && (
+      {localError && (
         <div className="p-3 text-xs sm:text-sm text-rose-600 bg-rose-50 border border-rose-200 rounded-2xl font-semibold flex items-center gap-2">
-          <span>⚠️</span> {state.error}
+          <span>⚠️</span> {localError}
         </div>
       )}
 
@@ -724,6 +766,7 @@ export function TransactionForm({
             if (newCat && newCat.id) {
               setLocalCategories(prev => [...prev, newCat])
               setCategoryId(newCat.id)
+              invalidateData()
               toast.success(`Categoria "${newCat.name}" criada e selecionada!`)
             }
           }}

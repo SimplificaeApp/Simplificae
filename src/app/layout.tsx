@@ -20,6 +20,7 @@ export const metadata: Metadata = {
 
 import { QueryProvider } from '@/components/providers/QueryProvider';
 import { PwaRegister } from '@/components/providers/PwaRegister';
+import { SyncProvider } from '@/components/providers/SyncProvider';
 
 export default function RootLayout({
   children,
@@ -32,13 +33,15 @@ export default function RootLayout({
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >
         <QueryProvider>
-          <PwaRegister />
-          {children}
-          <Toaster 
-            theme="light" 
-            position="top-right" 
-            richColors 
-          />
+          <SyncProvider>
+            <PwaRegister />
+            {children}
+            <Toaster 
+              theme="light" 
+              position="top-right" 
+              richColors 
+            />
+          </SyncProvider>
         </QueryProvider>
       </body>
     </html>

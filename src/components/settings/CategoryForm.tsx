@@ -33,10 +33,21 @@ interface State {
 }
 const initialState: State = {}
 
+import { toast } from 'sonner'
+import { useRouter } from 'next/navigation'
+import { enqueueMutation } from '@/lib/offlineSync'
+import { useInvalidateFinancialData } from '@/hooks/useFinancialData'
+
 export function CategoryForm({ workspaceId, initialData, onSuccess }: CategoryFormProps) {
   const isEditing = Boolean(initialData && initialData.id)
-  const actionFn = (isEditing ? updateCategory.bind(null, initialData!.id) : createCategory) as (state: State, formData: FormData) => Promise<State>
-  const [state, formAction, pending] = useActionState(actionFn, initialState)
+  const actionToUse = isEditing ? updateCategory.bind(null, initialData!.id) : createCategory
+  
+  const [isPendingLocal, setIsPendingLocal] = useState(false)
+  const pending = isPendingLocal
+  const [localError, setLocalError] = useState<string | null>(null)
+  
+  const router = useRouter()
+  const invalidateData = useInvalidateFinancialData()
 
   const [showEmojiPicker, setShowEmojiPicker] = useState(false)
   const [selectedEmoji, setSelectedEmoji] = useState(initialData?.icon || '💰')
@@ -63,25 +74,66 @@ export function CategoryForm({ workspaceId, initialData, onSuccess }: CategoryFo
     setBudgetAmount(value)
   }
 
-  useEffect(() => {
-    if (state.success && onSuccess) {
-      onSuccess(state.category)
+  const customAction = async (formData: FormData) => {
+    setIsPendingLocal(true)
+    setLocalError(null)
+    const payload = Object.fromEntries(formData.entries())
+    
+    // Check if offline
+    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+       const newMutation = await enqueueMutation({
+          actionType: isEditing ? 'UPDATE_CATEGORY' : 'CREATE_CATEGORY',
+          payload: { ...payload, id: initialData?.id }
+       })
+       toast.info('Você está offline. Categoria salva localmente e será sincronizada depois.')
+       invalidateData() 
+       router.refresh()
+       
+       // Call onSuccess with optimistic data so it selects it immediately if needed
+       if (onSuccess) onSuccess({ id: newMutation.id, ...payload })
+       setIsPendingLocal(false)
+       return
     }
-  }, [state.success, state.category, onSuccess])
+
+    try {
+      const res = await actionToUse({}, formData) as any
+      if (res?.error) {
+         setLocalError(res.error)
+      } else {
+         invalidateData()
+         router.refresh()
+         if (onSuccess) onSuccess(res.category)
+      }
+    } catch (err: any) {
+      if (err.message && (err.message.includes('fetch') || err.message.includes('Network'))) {
+        const newMutation = await enqueueMutation({
+           actionType: isEditing ? 'UPDATE_CATEGORY' : 'CREATE_CATEGORY',
+           payload: { ...payload, id: initialData?.id }
+        })
+        toast.info('Falha na conexão. Categoria salva offline e será sincronizada depois.')
+        invalidateData() 
+        router.refresh()
+        if (onSuccess) onSuccess({ id: newMutation.id, ...payload })
+      } else {
+        setLocalError('Erro ao salvar categoria.')
+      }
+    }
+    setIsPendingLocal(false)
+  }
 
   const effectiveType = categoryKind === 'income' ? 'income' : 'expense'
   const effectiveIsInvestment = categoryKind === 'investment'
 
   return (
-    <form action={formAction} className="flex flex-col gap-5">
+    <form action={customAction} className="flex flex-col gap-5">
       <input type="hidden" name="workspace_id" value={workspaceId} />
       <input type="hidden" name="icon" value={selectedEmoji} />
       <input type="hidden" name="type" value={effectiveType} />
       <input type="hidden" name="is_investment" value={effectiveIsInvestment ? 'true' : 'false'} />
       
-      {state.error && (
+      {localError && (
         <div className="p-3 text-sm text-rose-600 bg-rose-50 border border-rose-200 rounded-xl font-medium">
-          {state.error}
+          {localError}
         </div>
       )}
 
