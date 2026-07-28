@@ -75,18 +75,13 @@ self.addEventListener('fetch', (event) => {
         .then((response) => {
           if (response && response.status === 200) {
             const copy = response.clone()
-            // Remove the varying _rsc param to cache the route payload generically
-            const cacheUrl = new URL(request.url)
-            cacheUrl.searchParams.delete('_rsc')
-            caches.open(CACHE_NAME).then((cache) => cache.put(cacheUrl.toString(), copy))
+            caches.open(CACHE_NAME).then((cache) => cache.put(request, copy))
           }
           return response
         })
         .catch(async () => {
-          // Se falhar (offline), tenta recuperar o payload RSC sem o parâmetro dinâmico
-          const cacheUrl = new URL(request.url)
-          cacheUrl.searchParams.delete('_rsc')
-          const cachedResponse = await caches.match(cacheUrl.toString())
+          // Se falhar (offline), tenta recuperar o payload RSC exato que foi cacheado
+          const cachedResponse = await caches.match(request)
           if (cachedResponse) return cachedResponse
           
           // Fallback vazio para não travar o Next.js
