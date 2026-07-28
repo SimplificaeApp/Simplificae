@@ -20,35 +20,30 @@ export function QueryProvider({ children }: QueryProviderProps) {
             refetchOnWindowFocus: true, // Revalidate when user returns to app tab
             refetchOnReconnect: true, // Revalidate when internet connection is restored
             retry: 1,
+            networkMode: 'offlineFirst', // Allow queries and mutations to be paused when offline instead of failing
           },
         },
       })
   )
 
-  const [persister, setPersister] = useState<any>(null)
-
-  useEffect(() => {
+  const [persister] = useState(() => {
     if (typeof window !== 'undefined') {
-      const storagePersister = createSyncStoragePersister({
+      return createSyncStoragePersister({
         storage: window.localStorage,
         key: 'FINANCE_APP_QUERY_CACHE',
       })
-      setPersister(storagePersister)
     }
-  }, [])
-
-  if (!persister) {
-    return (
-      <QueryClientProvider client={queryClient}>
-        {children}
-      </QueryClientProvider>
-    )
-  }
+    return {
+      persistClient: () => undefined,
+      restoreClient: () => undefined,
+      removeClient: () => undefined,
+    }
+  })
 
   return (
     <PersistQueryClientProvider
       client={queryClient}
-      persistOptions={{ persister, maxAge: 1000 * 60 * 60 * 24 * 7 }} // 7 days max cache age
+      persistOptions={{ persister: persister as any, maxAge: 1000 * 60 * 60 * 24 * 7 }}
     >
       {children}
     </PersistQueryClientProvider>
