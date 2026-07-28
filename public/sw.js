@@ -1,4 +1,4 @@
-const CACHE_NAME = 'financeos-pwa-v5'
+const CACHE_NAME = 'financeos-pwa-v7'
 const STATIC_ASSETS = [
   '/',
   '/planned',
@@ -51,17 +51,15 @@ self.addEventListener('fetch', (event) => {
   // Navigation / HTML requests
   if (request.mode === 'navigate' || request.headers.get('accept')?.includes('text/html')) {
     event.respondWith(
-      fetch(request)
-        .then((response) => {
+      (async () => {
+        const cachedResponse = await caches.match(request)
+        const fetchPromise = fetch(request).then((response) => {
           if (response && response.status === 200) {
             const copy = response.clone()
             caches.open(CACHE_NAME).then((cache) => cache.put(request, copy))
           }
           return response
-        })
-        .catch(async () => {
-          // If network request fails (Offline), return matching cached route or fallback to root '/'
-          const cachedResponse = await caches.match(request)
+        }).catch(async () => {
           if (cachedResponse) return cachedResponse
           const rootFallback = await caches.match('/')
           if (rootFallback) return rootFallback
@@ -70,6 +68,9 @@ self.addEventListener('fetch', (event) => {
             { headers: { 'Content-Type': 'text/html' } }
           )
         })
+
+        return cachedResponse || fetchPromise
+      })()
     )
     return
   }
@@ -77,22 +78,21 @@ self.addEventListener('fetch', (event) => {
   // Next.js RSC (React Server Components) Payloads for Client Navigation
   if (request.headers.get('RSC') === '1' || url.searchParams.has('_rsc')) {
     event.respondWith(
-      fetch(request)
-        .then((response) => {
+      (async () => {
+        const cachedResponse = await caches.match(request)
+        const fetchPromise = fetch(request).then((response) => {
           if (response && response.status === 200) {
             const copy = response.clone()
             caches.open(CACHE_NAME).then((cache) => cache.put(request, copy))
           }
           return response
-        })
-        .catch(async () => {
-          // Se falhar (offline), tenta recuperar o payload RSC exato que foi cacheado
-          const cachedResponse = await caches.match(request)
+        }).catch(async () => {
           if (cachedResponse) return cachedResponse
-          
-          // Fallback vazio para não travar o Next.js
-          return new Response('', { status: 503 })
+          return Response.error()
         })
+        
+        return cachedResponse || fetchPromise
+      })()
     )
     return
   }

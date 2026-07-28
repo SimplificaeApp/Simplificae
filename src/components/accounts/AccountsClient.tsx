@@ -28,7 +28,7 @@ export function AccountsClient({
 }) {
   const { data: cachedAccounts } = useAccountsQuery(initialAccounts)
   const invalidateData = useInvalidateFinancialData()
-  const accounts = cachedAccounts || initialAccounts
+  const accounts = (cachedAccounts || initialAccounts).filter(a => a.type !== 'credit_card')
   const [isAccountModalOpen, setIsAccountModalOpen] = useState(false)
   const [isVaultModalOpen, setIsVaultModalOpen] = useState(false)
   const [selectedAccountId, setSelectedAccountId] = useState<string | null>(null)
