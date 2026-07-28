@@ -9,6 +9,20 @@ interface QueryProviderProps {
   children: React.ReactNode
 }
 
+let browserPersister: any = null
+if (typeof window !== 'undefined') {
+  browserPersister = createSyncStoragePersister({
+    storage: window.localStorage,
+    key: 'FINANCE_APP_QUERY_CACHE',
+  })
+}
+
+const dummyPersister = {
+  persistClient: () => undefined,
+  restoreClient: () => undefined,
+  removeClient: () => undefined,
+}
+
 export function QueryProvider({ children }: QueryProviderProps) {
   const [queryClient] = useState(
     () =>
@@ -26,30 +40,10 @@ export function QueryProvider({ children }: QueryProviderProps) {
       })
   )
 
-  const [persister, setPersister] = useState<any>(null)
-
-  useEffect(() => {
-    if (typeof window !== 'undefined') {
-      const storagePersister = createSyncStoragePersister({
-        storage: window.localStorage,
-        key: 'FINANCE_APP_QUERY_CACHE',
-      })
-      setPersister(storagePersister)
-    }
-  }, [])
-
-  if (!persister) {
-    return (
-      <QueryClientProvider client={queryClient}>
-        {children}
-      </QueryClientProvider>
-    )
-  }
-
   return (
     <PersistQueryClientProvider
       client={queryClient}
-      persistOptions={{ persister, maxAge: 1000 * 60 * 60 * 24 * 7 }} // 7 days max cache age
+      persistOptions={{ persister: browserPersister || dummyPersister, maxAge: 1000 * 60 * 60 * 24 * 7 }} // 7 days max cache age
     >
       {children}
     </PersistQueryClientProvider>
