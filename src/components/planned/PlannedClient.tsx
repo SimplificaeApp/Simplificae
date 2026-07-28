@@ -35,7 +35,7 @@ import { payTransactionNew, unpayTransaction, deleteTransaction } from '@/app/ac
 import { updateWorkspaceTurnoverDay } from '@/app/actions/settings'
 import { getCreditCardDueDate } from '@/lib/creditCardUtils'
 import { toast } from 'sonner'
-import { useInvalidateFinancialData } from '@/hooks/useFinancialData'
+import { useTransactionsQuery, useCategoriesQuery, useAccountsQuery, useInvalidateFinancialData } from '@/hooks/useFinancialData'
 
 // Dynamic load for ECharts
 const ReactECharts = dynamic(() => import('echarts-for-react'), {
@@ -113,11 +113,19 @@ export function PlannedClient({
   const [kpiModal, setKpiModal] = useState<{ title: string; type: 'income' | 'fixed' | 'variable' | 'investments' } | null>(null)
   const [chartCostFilter, setChartCostFilter] = useState<'all' | 'fixed' | 'variable'>('all')
   const [showAllVariableCategories, setShowAllVariableCategories] = useState(false)
-  const [localTransactions, setLocalTransactions] = useState(transactions)
+  const { data: cachedTransactions } = useTransactionsQuery(transactions)
+  const { data: cachedCategories } = useCategoriesQuery(categories)
+  const { data: cachedAccounts } = useAccountsQuery(accounts)
+
+  const activeTransactions = cachedTransactions || transactions
+  const activeCategories = cachedCategories || categories
+  const activeAccounts = cachedAccounts || accounts
+
+  const [localTransactions, setLocalTransactions] = useState(activeTransactions)
 
   useEffect(() => {
-    setLocalTransactions(transactions)
-  }, [transactions])
+    setLocalTransactions(activeTransactions)
+  }, [activeTransactions])
 
   const [isPending, startTransition] = useTransition()
 

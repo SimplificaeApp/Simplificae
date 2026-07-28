@@ -1,6 +1,10 @@
-const CACHE_NAME = 'financeos-pwa-v3'
+const CACHE_NAME = 'financeos-pwa-v4'
 const STATIC_ASSETS = [
   '/',
+  '/planned',
+  '/transactions',
+  '/accounts',
+  '/settings',
   '/manifest.webmanifest',
   '/icon',
   '/apple-icon'

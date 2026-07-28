@@ -9,7 +9,7 @@ import { motion } from 'framer-motion'
 import { deleteCategory } from '@/app/actions/categories'
 import { updatePrivacyPin, updateWorkspaceTurnoverDay } from '@/app/actions/settings'
 import { toast } from 'sonner'
-import { useInvalidateFinancialData } from '@/hooks/useFinancialData'
+import { useCategoriesQuery, useInvalidateFinancialData } from '@/hooks/useFinancialData'
 
 type Category = { 
   id: string
@@ -27,7 +27,7 @@ const currencyFmt = new Intl.NumberFormat('pt-BR', { style: 'currency', currency
 export function SettingsClient({
   workspaceId,
   workspace,
-  categories,
+  categories: initialCategories,
   initialPin
 }: {
   workspaceId?: string
@@ -35,6 +35,8 @@ export function SettingsClient({
   categories: Category[]
   initialPin?: string
 }) {
+  const { data: cachedCategories } = useCategoriesQuery(initialCategories)
+  const categories = cachedCategories || initialCategories
   const invalidateData = useInvalidateFinancialData()
   const [activeTab, setActiveTab] = useState<'categories' | 'preferences' | 'privacy'>('categories')
   const [isModalOpen, setIsModalOpen] = useState(false)
