@@ -25,7 +25,8 @@ import {
 import { motion, AnimatePresence } from 'framer-motion'
 import { CategoryForm } from '@/components/settings/CategoryForm'
 import { Modal } from '@/components/ui/Modal'
-import { useInvalidateFinancialData } from '@/hooks/useFinancialData'
+import { useInvalidateFinancialData, QUERY_KEYS } from '@/hooks/useFinancialData'
+import { useQueryClient } from '@tanstack/react-query'
 
 interface Category {
   id: string
@@ -213,6 +214,7 @@ export function TransactionForm({
   const [isDeleting, setIsDeleting] = useState(false)
   const router = useRouter()
   const invalidateData = useInvalidateFinancialData()
+  const queryClient = useQueryClient()
 
   const customAction = async (formData: FormData) => {
     setIsPendingLocal(true)
@@ -221,13 +223,33 @@ export function TransactionForm({
     
     // Check if offline
     if (typeof navigator !== 'undefined' && !navigator.onLine) {
-       await enqueueMutation({
+       const newMutation = await enqueueMutation({
           actionType: initialData?.id ? 'UPDATE_TRANSACTION' : 'CREATE_TRANSACTION',
           payload: { ...payload, id: initialData?.id }
        })
        toast.info('Você está offline. Lançamento salvo localmente e será sincronizado depois.')
-       invalidateData() 
-       router.refresh()
+       
+       // Optimistic UI Update
+       if (!initialData?.id) {
+         queryClient.setQueryData(QUERY_KEYS.transactions, (old: any) => {
+           if (!old) return old
+           // Create a fake transaction for immediate UI feedback
+           const fakeTx = {
+             id: newMutation.id,
+             amount: payload.amount ? Number(payload.amount.toString().replace('.', '').replace(',', '.')) : 0,
+             description: payload.description,
+             type: payload.type,
+             status: payload.status,
+             date: payload.date || new Date().toISOString(),
+             category_id: payload.category_id,
+             account_id: payload.account_id,
+             category: categories.find(c => c.id === payload.category_id),
+             account: accounts.find(a => a.id === payload.account_id)
+           }
+           return [fakeTx, ...old]
+         })
+       }
+       
        if (onSuccess) onSuccess()
        setIsPendingLocal(false)
        return
@@ -250,7 +272,6 @@ export function TransactionForm({
         })
         toast.info('Falha na conexão. Lançamento salvo offline e será sincronizado depois.')
         invalidateData() 
-        router.refresh()
         if (onSuccess) onSuccess()
       } else {
         setLocalError('Erro ao salvar transação.')

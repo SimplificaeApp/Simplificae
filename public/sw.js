@@ -68,6 +68,34 @@ self.addEventListener('fetch', (event) => {
     return
   }
 
+  // Next.js RSC (React Server Components) Payloads for Client Navigation
+  if (request.headers.get('RSC') === '1' || url.searchParams.has('_rsc')) {
+    event.respondWith(
+      fetch(request)
+        .then((response) => {
+          if (response && response.status === 200) {
+            const copy = response.clone()
+            // Remove the varying _rsc param to cache the route payload generically
+            const cacheUrl = new URL(request.url)
+            cacheUrl.searchParams.delete('_rsc')
+            caches.open(CACHE_NAME).then((cache) => cache.put(cacheUrl.toString(), copy))
+          }
+          return response
+        })
+        .catch(async () => {
+          // Se falhar (offline), tenta recuperar o payload RSC sem o parâmetro dinâmico
+          const cacheUrl = new URL(request.url)
+          cacheUrl.searchParams.delete('_rsc')
+          const cachedResponse = await caches.match(cacheUrl.toString())
+          if (cachedResponse) return cachedResponse
+          
+          // Fallback vazio para não travar o Next.js
+          return new Response('', { status: 503 })
+        })
+    )
+    return
+  }
+
   // Static Next.js assets (_next/static, fonts, icons) -> Cache First
   if (url.pathname.startsWith('/_next/') || url.pathname.match(/\.(png|jpg|jpeg|svg|gif|ico|css|js)$/)) {
     event.respondWith(

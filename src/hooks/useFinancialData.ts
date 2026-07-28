@@ -113,6 +113,12 @@ export function useInvalidateFinancialData() {
   const queryClient = useQueryClient()
 
   return () => {
+    // Only invalidate if online. If offline, the refetch will fail anyway.
+    // Optimistic UI should be handled locally without invalidation.
+    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+      return
+    }
+    
     queryClient.invalidateQueries({ queryKey: QUERY_KEYS.transactions })
     queryClient.invalidateQueries({ queryKey: QUERY_KEYS.accounts })
     queryClient.invalidateQueries({ queryKey: QUERY_KEYS.categories })

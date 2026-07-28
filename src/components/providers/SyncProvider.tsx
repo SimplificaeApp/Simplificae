@@ -18,6 +18,9 @@ const SyncContext = createContext<SyncContextType>({ isOnline: true, pendingCoun
 
 export const useSync = () => useContext(SyncContext)
 
+// Prevent concurrent syncs across renders or rapid events
+let isSyncingGlobal = false
+
 export function SyncProvider({ children }: { children: React.ReactNode }) {
   const [isOnline, setIsOnline] = useState(true)
   const [pendingCount, setPendingCount] = useState(0)
@@ -36,11 +39,12 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
   }, [])
 
   const processQueue = useCallback(async () => {
-    if (!navigator.onLine || isSyncing) return
+    if (!navigator.onLine || isSyncingGlobal) return
     
     const mutations = await getPendingMutations()
     if (mutations.length === 0) return
 
+    isSyncingGlobal = true
     setIsSyncing(true)
     let syncedAny = false
 
@@ -103,8 +107,9 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
       setTimeout(() => setShowSyncSuccess(false), 3000)
     }
 
+    isSyncingGlobal = false
     setIsSyncing(false)
-  }, [isSyncing, invalidateData, checkStatus])
+  }, [invalidateData, checkStatus])
 
   useEffect(() => {
     checkStatus()

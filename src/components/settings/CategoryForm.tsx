@@ -36,7 +36,8 @@ const initialState: State = {}
 import { toast } from 'sonner'
 import { useRouter } from 'next/navigation'
 import { enqueueMutation } from '@/lib/offlineSync'
-import { useInvalidateFinancialData } from '@/hooks/useFinancialData'
+import { useInvalidateFinancialData, QUERY_KEYS } from '@/hooks/useFinancialData'
+import { useQueryClient } from '@tanstack/react-query'
 
 export function CategoryForm({ workspaceId, initialData, onSuccess }: CategoryFormProps) {
   const isEditing = Boolean(initialData && initialData.id)
@@ -48,6 +49,7 @@ export function CategoryForm({ workspaceId, initialData, onSuccess }: CategoryFo
   
   const router = useRouter()
   const invalidateData = useInvalidateFinancialData()
+  const queryClient = useQueryClient()
 
   const [showEmojiPicker, setShowEmojiPicker] = useState(false)
   const [selectedEmoji, setSelectedEmoji] = useState(initialData?.icon || '💰')
@@ -86,8 +88,23 @@ export function CategoryForm({ workspaceId, initialData, onSuccess }: CategoryFo
           payload: { ...payload, id: initialData?.id }
        })
        toast.info('Você está offline. Categoria salva localmente e será sincronizada depois.')
-       invalidateData() 
-       router.refresh()
+       
+       // Optimistic UI Update
+       if (!isEditing) {
+         queryClient.setQueryData(QUERY_KEYS.categories, (old: any) => {
+           if (!old) return old
+           const fakeCat = {
+             id: newMutation.id,
+             name: payload.name,
+             type: payload.type,
+             icon: payload.icon,
+             is_investment: payload.is_investment === 'true',
+             budget_amount: payload.budget_amount ? Number(payload.budget_amount.toString().replace('.', '').replace(',', '.')) : 0,
+             is_fixed: payload.is_fixed === 'on'
+           }
+           return [...old, fakeCat].sort((a, b) => a.name.localeCompare(b.name))
+         })
+       }
        
        // Call onSuccess with optimistic data so it selects it immediately if needed
        if (onSuccess) onSuccess({ id: newMutation.id, ...payload })
@@ -112,7 +129,6 @@ export function CategoryForm({ workspaceId, initialData, onSuccess }: CategoryFo
         })
         toast.info('Falha na conexão. Categoria salva offline e será sincronizada depois.')
         invalidateData() 
-        router.refresh()
         if (onSuccess) onSuccess({ id: newMutation.id, ...payload })
       } else {
         setLocalError('Erro ao salvar categoria.')
