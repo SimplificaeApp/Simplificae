@@ -80,9 +80,9 @@ const MONTH_NAMES = [
 
 export function PlannedClient({
   user,
-  transactions = [],
-  categories = [],
-  accounts = [],
+  transactions: initialTransactions = [],
+  categories: initialCategories = [],
+  accounts: initialAccounts = [],
   workspaces = [],
   workspace
 }: {
@@ -113,19 +113,19 @@ export function PlannedClient({
   const [kpiModal, setKpiModal] = useState<{ title: string; type: 'income' | 'fixed' | 'variable' | 'investments' } | null>(null)
   const [chartCostFilter, setChartCostFilter] = useState<'all' | 'fixed' | 'variable'>('all')
   const [showAllVariableCategories, setShowAllVariableCategories] = useState(false)
-  const { data: cachedTransactions } = useTransactionsQuery(transactions)
-  const { data: cachedCategories } = useCategoriesQuery(categories)
-  const { data: cachedAccounts } = useAccountsQuery(accounts)
+  const { data: cachedTransactions } = useTransactionsQuery(initialTransactions)
+  const { data: cachedCategories } = useCategoriesQuery(initialCategories)
+  const { data: cachedAccounts } = useAccountsQuery(initialAccounts)
 
-  const activeTransactions = cachedTransactions || transactions
-  const activeCategories = cachedCategories || categories
-  const activeAccounts = cachedAccounts || accounts
+  const transactions = cachedTransactions || initialTransactions
+  const categories = cachedCategories || initialCategories
+  const accounts = cachedAccounts || initialAccounts
 
-  const [localTransactions, setLocalTransactions] = useState(activeTransactions)
+  const [localTransactions, setLocalTransactions] = useState(transactions)
 
   useEffect(() => {
-    setLocalTransactions(activeTransactions)
-  }, [activeTransactions])
+    setLocalTransactions(transactions)
+  }, [transactions])
 
   const [isPending, startTransition] = useTransition()
 

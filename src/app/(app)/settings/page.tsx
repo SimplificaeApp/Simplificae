@@ -16,13 +16,6 @@ export default async function SettingsPage() {
 
   let categories: any[] = []
 
-  if (currentWorkspace) {
-    const [catRes] = await Promise.all([
-      supabase.from('categories').select('*').eq('workspace_id', currentWorkspace.id).order('name', { ascending: true })
-    ])
-    categories = catRes.data || []
-  }
-
   return (
     <main className="flex-1 p-6 lg:p-8 max-w-5xl mx-auto w-full">
       <div className="mb-8">

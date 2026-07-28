@@ -476,7 +476,21 @@ export function AssistantClient() {
   const [insights, setInsights] = useState<FinancialInsight[]>([])
   const [isInsightsLoading, setIsInsightsLoading] = useState(false)
   const [isMobileInsightsOpen, setIsMobileInsightsOpen] = useState(false)
+  const [isOffline, setIsOffline] = useState(false)
 
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      setIsOffline(!navigator.onLine)
+      const handleOnline = () => setIsOffline(false)
+      const handleOffline = () => setIsOffline(true)
+      window.addEventListener('online', handleOnline)
+      window.addEventListener('offline', handleOffline)
+      return () => {
+        window.removeEventListener('online', handleOnline)
+        window.removeEventListener('offline', handleOffline)
+      }
+    }
+  }, [])
   const handleGenerateInsights = async () => {
     setIsInsightsLoading(true)
     try {
@@ -699,11 +713,21 @@ export function AssistantClient() {
           <div ref={bottomRef} />
         </div>
 
+        {isOffline && (
+          <div className="mx-auto max-w-4xl w-full px-4 mb-2">
+            <div className="bg-rose-50 border border-rose-200 text-rose-700 text-sm px-4 py-3 rounded-xl flex items-center justify-center gap-2">
+              <AlertTriangle className="w-5 h-5 shrink-0" />
+              <span><strong>A IA requer conexão com a internet.</strong> Conecte-se para conversar com seu assistente.</span>
+            </div>
+          </div>
+        )}
+
         {/* Input */}
         <div className="p-3 md:p-4 bg-transparent shrink-0 relative z-20">
-          <div className="flex gap-2 items-center bg-white/80 backdrop-blur-2xl border border-slate-200/80 shadow-[0_8px_30px_rgb(0,0,0,0.08)] rounded-full px-2.5 py-2 md:focus-within:border-violet-300 md:focus-within:ring-4 focus-within:ring-violet-100/50 transition-all max-w-4xl mx-auto w-full">
+          <div className={`flex gap-2 items-center bg-white/80 backdrop-blur-2xl border border-slate-200/80 shadow-[0_8px_30px_rgb(0,0,0,0.08)] rounded-full px-2.5 py-2 transition-all max-w-4xl mx-auto w-full ${isOffline ? 'opacity-60 cursor-not-allowed' : 'md:focus-within:border-violet-300 md:focus-within:ring-4 focus-within:ring-violet-100/50'}`}>
             <button
               onClick={handleVoice}
+              disabled={isOffline}
               className={`p-2 rounded-xl transition-all shrink-0 ${
                 isListening
                   ? 'bg-rose-500 text-white animate-pulse'
@@ -719,15 +743,16 @@ export function AssistantClient() {
               value={inputText}
               onChange={e => setInputText(e.target.value)}
               onKeyDown={e => e.key === 'Enter' && !e.shiftKey && handleSubmit()}
-              placeholder="Pergunte qualquer coisa sobre suas finanças..."
-              className="flex-1 min-w-0 bg-transparent text-[15px] font-medium text-slate-700 placeholder:text-slate-400 focus:outline-none py-1.5 px-2"
+              placeholder={isOffline ? 'Você está offline' : 'Pergunte qualquer coisa sobre suas finanças...'}
+              disabled={isOffline}
+              className="flex-1 min-w-0 bg-transparent text-[15px] font-medium text-slate-700 placeholder:text-slate-400 focus:outline-none py-1.5 px-2 disabled:bg-transparent"
             />
 
             <button
               onClick={handleSubmit}
-              disabled={isLoading || !inputText.trim()}
+              disabled={isLoading || !inputText.trim() || isOffline}
               className={`p-2 rounded-xl transition-all shrink-0 flex items-center justify-center ${
-                isListening || !inputText.trim() || isLoading
+                isListening || !inputText.trim() || isLoading || isOffline
                   ? 'bg-slate-100 text-slate-400'
                   : 'bg-gradient-to-br from-violet-500 to-indigo-600 text-white shadow-md shadow-violet-200 hover:scale-105'
               }`}

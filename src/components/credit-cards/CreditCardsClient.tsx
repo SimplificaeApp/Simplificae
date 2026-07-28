@@ -11,17 +11,36 @@ import { InvoiceTimelineModal } from './InvoiceTimelineModal'
 import { calculateCardBalances, getInvoiceForOffset } from '@/lib/creditCardUtils'
 import dynamic from 'next/dynamic'
 
+import { useTransactionsQuery, useCategoriesQuery, useAccountsQuery } from '@/hooks/useFinancialData'
+
 const ReactECharts = dynamic(() => import('echarts-for-react'), { ssr: false, loading: () => <div className="h-full w-full bg-slate-50 rounded-xl animate-pulse" /> })
 
 interface CreditCardsClientProps {
   workspaceId: string
-  creditCards: any[]
+  creditCards?: any[]
   allAccounts: any[]
   categories: any[]
   transactions: any[]
 }
 
-export function CreditCardsClient({ workspaceId, creditCards, allAccounts, categories, transactions }: CreditCardsClientProps) {
+export function CreditCardsClient({ 
+  workspaceId, 
+  allAccounts: initialAllAccounts, 
+  categories: initialCategories, 
+  transactions: initialTransactions 
+}: CreditCardsClientProps) {
+  const { data: cachedAccounts } = useAccountsQuery(initialAllAccounts)
+  const allAccounts = cachedAccounts || initialAllAccounts
+  const creditCards = allAccounts.filter(a => a.type === 'credit_card')
+
+  const { data: cachedTransactions } = useTransactionsQuery(initialTransactions)
+  const allTransactions = cachedTransactions || initialTransactions
+  const ccIds = new Set(creditCards.map(c => c.id))
+  const transactions = allTransactions.filter(t => ccIds.has(t.account_id))
+
+  const { data: cachedCategories } = useCategoriesQuery(initialCategories)
+  const categories = cachedCategories || initialCategories
+
   const [isModalOpen, setIsModalOpen] = useState(false)
   const [isDetailsOpen, setIsDetailsOpen] = useState(false)
   const [isTransactionOpen, setIsTransactionOpen] = useState(false)
