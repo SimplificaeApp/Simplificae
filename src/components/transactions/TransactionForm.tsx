@@ -25,6 +25,7 @@ import {
 import { motion, AnimatePresence } from 'framer-motion'
 import { CategoryForm } from '@/components/settings/CategoryForm'
 import { Modal } from '@/components/ui/Modal'
+import { useInvalidateFinancialData } from '@/hooks/useFinancialData'
 
 interface Category {
   id: string
@@ -206,13 +207,15 @@ export function TransactionForm({
 
   const [isDeleting, setIsDeleting] = useState(false)
   const router = useRouter()
+  const invalidateData = useInvalidateFinancialData()
 
   useEffect(() => {
-    if (state.success && onSuccess) {
+    if (state.success) {
+      invalidateData()
       router.refresh()
-      onSuccess()
+      if (onSuccess) onSuccess()
     }
-  }, [state.success, onSuccess, router])
+  }, [state.success, onSuccess, router, invalidateData])
 
   const executeDelete = (scope: 'single' | 'future') => {
     if (!initialData) return
@@ -223,6 +226,7 @@ export function TransactionForm({
       if (res?.error) toast.error(res.error)
       else {
         toast.success(scope === 'future' ? 'Lançamento e próximos excluídos!' : 'Lançamento excluído!')
+        invalidateData()
         if (onSuccess) onSuccess()
       }
     })

@@ -24,6 +24,7 @@ import { TransactionForm } from "@/components/transactions/TransactionForm";
 import { getCreditCardDueDate } from "@/lib/creditCardUtils";
 import { Lock } from "lucide-react";
 import dynamic from "next/dynamic";
+import { useTransactionsQuery, useCategoriesQuery, useAccountsQuery } from "@/hooks/useFinancialData";
 
 // Lazy load ECharts to avoid large bundle impact on initial load
 const ReactECharts = dynamic(() => import("echarts-for-react"), { ssr: false, loading: () => <div className="h-full w-full bg-slate-50 rounded-xl animate-pulse" /> });
@@ -110,9 +111,9 @@ function DonutTooltip({ active, payload }: any) {
 export function DashboardClient({
   user,
   workspaces,
-  transactions,
-  categories,
-  accounts,
+  transactions: initialTransactions,
+  categories: initialCategories,
+  accounts: initialAccounts,
 }: {
   user: any;
   workspaces: Workspace[];
@@ -120,6 +121,14 @@ export function DashboardClient({
   categories: Category[];
   accounts: Account[];
 }) {
+  const { data: cachedTransactions } = useTransactionsQuery(initialTransactions);
+  const { data: cachedCategories } = useCategoriesQuery(initialCategories);
+  const { data: cachedAccounts } = useAccountsQuery(initialAccounts);
+
+  const transactions = cachedTransactions || initialTransactions;
+  const categories = cachedCategories || initialCategories;
+  const accounts = cachedAccounts || initialAccounts;
+
   const [isTxModalOpen, setIsTxModalOpen] = useState(false);
   const [selectedAccount, setSelectedAccount] = useState<string>("all");
   const [selectedCategory, setSelectedCategory] = useState<string>("all");
@@ -300,7 +309,7 @@ export function DashboardClient({
     accounts.forEach(a => {
       if (selectedAccount === "all" || a.id === selectedAccount) {
         if (a.account_vaults) {
-          sum += a.account_vaults.reduce((acc, v) => {
+          sum += a.account_vaults.reduce((acc: number, v: Vault) => {
             if ((v as any).include_in_dashboard === false) return acc;
             if ((v as any).is_hidden && !isUnlocked) return acc;
             return acc + Number(v.balance);
@@ -937,7 +946,7 @@ export function DashboardClient({
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
             {liquidAccounts.map(acc => {
-              const vaultSum = acc.account_vaults?.reduce((sum, v) => sum + Number(v.balance), 0) || 0;
+              const vaultSum = acc.account_vaults?.reduce((sum: number, v: Vault) => sum + Number(v.balance), 0) || 0;
               return (
                 <div
                   key={acc.id}
