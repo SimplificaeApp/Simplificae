@@ -26,24 +26,30 @@ export function QueryProvider({ children }: QueryProviderProps) {
       })
   )
 
-  const [persister] = useState(() => {
+  const [persister, setPersister] = useState<any>(null)
+
+  useEffect(() => {
     if (typeof window !== 'undefined') {
-      return createSyncStoragePersister({
+      const storagePersister = createSyncStoragePersister({
         storage: window.localStorage,
         key: 'FINANCE_APP_QUERY_CACHE',
       })
+      setPersister(storagePersister)
     }
-    return {
-      persistClient: () => undefined,
-      restoreClient: () => undefined,
-      removeClient: () => undefined,
-    }
-  })
+  }, [])
+
+  if (!persister) {
+    return (
+      <QueryClientProvider client={queryClient}>
+        {children}
+      </QueryClientProvider>
+    )
+  }
 
   return (
     <PersistQueryClientProvider
       client={queryClient}
-      persistOptions={{ persister: persister as any, maxAge: 1000 * 60 * 60 * 24 * 7 }}
+      persistOptions={{ persister, maxAge: 1000 * 60 * 60 * 24 * 7 }} // 7 days max cache age
     >
       {children}
     </PersistQueryClientProvider>
