@@ -553,6 +553,20 @@ export function AssistantClient() {
     r.start()
   }
 
+  if (isOffline) {
+    return (
+      <div className="flex flex-col items-center justify-center h-full gap-4 text-center p-6 bg-white md:rounded-3xl border-0 md:border border-slate-100 shadow-sm">
+        <div className="w-16 h-16 rounded-2xl bg-slate-50 flex items-center justify-center mb-2">
+          <AlertTriangle className="w-8 h-8 text-slate-400" />
+        </div>
+        <h3 className="text-xl font-bold text-slate-800">Você está offline</h3>
+        <p className="text-sm text-slate-500 max-w-sm">
+          A IA processa seus dados na nuvem e requer conexão com a internet. Conecte-se para conversar com o assistente e receber insights.
+        </p>
+      </div>
+    )
+  }
+
   return (
     <div className="flex flex-col xl:flex-row gap-5 h-full min-h-0">
 

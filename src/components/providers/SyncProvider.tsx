@@ -41,12 +41,14 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
   const processQueue = useCallback(async () => {
     if (!navigator.onLine || isSyncingGlobal) return
     
-    const mutations = await getPendingMutations()
-    if (mutations.length === 0) return
-
     isSyncingGlobal = true
     setIsSyncing(true)
-    let syncedAny = false
+
+    try {
+      const mutations = await getPendingMutations()
+      if (mutations.length === 0) return
+      
+      let syncedAny = false
 
     for (const mutation of mutations) {
       try {
@@ -106,9 +108,11 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
       setShowSyncSuccess(true)
       setTimeout(() => setShowSyncSuccess(false), 3000)
     }
-
-    isSyncingGlobal = false
-    setIsSyncing(false)
+    } finally {
+      isSyncingGlobal = false
+      setIsSyncing(false)
+      checkStatus()
+    }
   }, [invalidateData, checkStatus])
 
   useEffect(() => {
