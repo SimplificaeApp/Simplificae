@@ -2104,6 +2104,7 @@ export function PlannedClient({
                   <div className="flex flex-col gap-2.5 max-h-[380px] overflow-y-auto pr-0.5">
                     {catTxList.map(t => {
                       const isPaid = t.status === 'paid_planned' || t.status === 'posted'
+                      const acc = t.account_id ? accountsMap[t.account_id] : (t.account || null)
 
                       return (
                         <div
@@ -2125,9 +2126,16 @@ export function PlannedClient({
                             </span>
                           </div>
 
-                          {/* Linha Inferior: Data + Botão de Ação */}
+                          {/* Linha Inferior: Data + Conta + Botão de Ação */}
                           <div className="flex items-center justify-between gap-2 text-[11px] text-slate-500 pt-1.5 border-t border-slate-100">
-                            <span className="font-semibold text-slate-600">{dateFmt.format(new Date(t.date + 'T12:00:00'))}</span>
+                            <div className="flex items-center gap-1.5 font-semibold text-slate-600 truncate">
+                              <span>{dateFmt.format(new Date(t.date + 'T12:00:00'))}</span>
+                              {acc && (
+                                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-slate-100 text-slate-600 text-[10px]">
+                                  {acc.icon || '🏦'} {acc.name}
+                                </span>
+                              )}
+                            </div>
 
                             {isPaid ? (
                               <button

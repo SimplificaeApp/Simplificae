@@ -19,6 +19,7 @@ export const metadata: Metadata = {
 }
 
 import { QueryProvider } from '@/components/providers/QueryProvider';
+import { PwaRegister } from '@/components/providers/PwaRegister';
 
 export default function RootLayout({
   children,
@@ -31,6 +32,7 @@ export default function RootLayout({
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >
         <QueryProvider>
+          <PwaRegister />
           {children}
           <Toaster 
             theme="light" 
