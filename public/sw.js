@@ -1,4 +1,4 @@
-const CACHE_NAME = 'financeos-pwa-v1'
+const CACHE_NAME = 'financeos-pwa-v3'
 const STATIC_ASSETS = [
   '/',
   '/manifest.webmanifest',
