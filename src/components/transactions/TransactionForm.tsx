@@ -444,22 +444,20 @@ export function TransactionForm({
         )}
       </div>
 
-      <div className={`grid grid-cols-1 ${!isPlanningMode ? 'sm:grid-cols-2' : ''} gap-3.5`}>
-        {!isPlanningMode && (
-          <div className="group">
-            <label className="block text-xs font-bold text-slate-700 mb-1">
-              {isTransfer ? 'Conta de Origem' : 'Conta'}
-            </label>
-            <CustomSelect
-              name="account_id"
-              value={accountId}
-              onChange={setAccountId}
-              placeholder="Selecione a conta..."
-              required
-              options={groupedAccountOptions}
-            />
-          </div>
-        )}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+        <div className="group">
+          <label className="block text-xs font-bold text-slate-700 mb-1">
+            {isTransfer ? 'Conta de Origem' : 'Conta'}
+          </label>
+          <CustomSelect
+            name="account_id"
+            value={accountId}
+            onChange={setAccountId}
+            placeholder={isPlanningMode ? "Selecione a conta (opcional)..." : "Selecione a conta..."}
+            required={!isPlanningMode}
+            options={groupedAccountOptions}
+          />
+        </div>
 
         <div className="group">
           <label className="block text-xs font-bold text-slate-700 mb-1" htmlFor="date">
