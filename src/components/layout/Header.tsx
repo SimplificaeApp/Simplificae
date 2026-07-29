@@ -1,11 +1,12 @@
 'use client'
 
 import { usePathname } from "next/navigation";
-import { LogOut, LayoutDashboard, ArrowRightLeft, CalendarDays, Wallet, CreditCard, Settings, Menu, X, PiggyBank, Sparkles } from "lucide-react";
+import { LogOut, LayoutDashboard, ArrowRightLeft, CalendarDays, Wallet, CreditCard, Settings, Menu, X, PiggyBank, Sparkles, RefreshCw } from "lucide-react";
 import { logout } from "@/app/(auth)/actions";
 import { useTransition, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import Link from "next/link";
+import { toast } from "sonner";
 
 const PAGE_LABELS: Record<string, { label: string; icon: any }> = {
   '/': { label: 'Dashboard', icon: LayoutDashboard },
@@ -30,11 +31,36 @@ export function Header({ workspaces = [], user }: { workspaces?: any[], user?: a
   const pathname = usePathname();
   const [isPending, startTransition] = useTransition();
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const [isRefreshing, setIsRefreshing] = useState(false);
   const firstName = user?.user_metadata?.first_name || user?.email?.split('@')[0] || 'Usuário';
   const initials = firstName.slice(0, 2).toUpperCase();
 
   const handleLogout = () => {
     startTransition(() => { logout(); });
+  };
+
+  const handleRefreshApp = async () => {
+    setIsRefreshing(true);
+    toast.info("Limpando cache e recarregando o aplicativo...");
+    try {
+      if (typeof window !== 'undefined') {
+        if ('serviceWorker' in navigator) {
+          const registrations = await navigator.serviceWorker.getRegistrations();
+          for (const reg of registrations) {
+            await reg.unregister();
+          }
+        }
+        if ('caches' in window) {
+          const cacheKeys = await caches.keys();
+          await Promise.all(cacheKeys.map(key => caches.delete(key)));
+        }
+      }
+    } catch (err) {
+      console.error("Erro ao limpar cache:", err);
+    }
+    setTimeout(() => {
+      window.location.reload();
+    }, 600);
   };
 
   const pageKey = Object.keys(PAGE_LABELS).find(k => k !== '/' && pathname.startsWith(k)) || (pathname === '/' ? '/' : null);
@@ -59,7 +85,18 @@ export function Header({ workspaces = [], user }: { workspaces?: any[], user?: a
         </div>
 
         {/* User area */}
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2.5 sm:gap-3">
+          {/* Botão Recarregar / Limpar Cache */}
+          <button
+            onClick={handleRefreshApp}
+            disabled={isRefreshing}
+            className="flex items-center gap-1.5 text-xs font-semibold text-slate-600 hover:text-emerald-600 transition-colors bg-slate-100/90 hover:bg-emerald-50 border border-slate-200/60 px-2.5 py-1.5 rounded-lg disabled:opacity-50"
+            title="Recarregar aplicativo e limpar cache"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${isRefreshing ? 'animate-spin text-emerald-600' : ''}`} />
+            <span className="hidden sm:inline">Atualizar</span>
+          </button>
+
           <span className="text-sm text-slate-500 hidden sm:block">
             Olá, <span className="font-bold text-slate-800">{firstName}</span>
           </span>

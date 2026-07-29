@@ -16,6 +16,15 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: 'FluxoAÊ - Gestão Financeira',
   description: 'Seu copiloto financeiro inteligente.',
+  manifest: '/manifest.webmanifest',
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: 'black-translucent',
+    title: 'FluxoAÊ',
+  },
+  formatDetection: {
+    telephone: false,
+  },
 }
 
 import { QueryProvider } from '@/components/providers/QueryProvider';
