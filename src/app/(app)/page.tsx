@@ -1,5 +1,6 @@
 import { createClient } from '@/lib/supabase/server'
 import { DashboardClient } from '@/components/dashboard/DashboardClient'
+import { redirect } from 'next/navigation'
 
 export const dynamic = 'force-dynamic'
 
@@ -22,6 +23,10 @@ export default async function Home() {
     workspaces = workspacesRes.data || []
   } catch (error) {
     console.error('Error loading SSR data in Home page:', error)
+  }
+
+  if (!user) {
+    redirect('/login')
   }
 
   return (
