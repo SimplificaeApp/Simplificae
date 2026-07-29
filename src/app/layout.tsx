@@ -16,11 +16,21 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: 'FluxoAÊ - Gestão Financeira',
   description: 'Seu copiloto financeiro inteligente.',
-  manifest: '/manifest.webmanifest',
+  manifest: '/manifest.json',
   appleWebApp: {
     capable: true,
     statusBarStyle: 'black-translucent',
     title: 'FluxoAÊ',
+  },
+  icons: {
+    icon: [
+      { url: '/favicon.png', type: 'image/png' },
+      { url: '/icon-192.png', sizes: '192x192', type: 'image/png' },
+      { url: '/icon-512.png', sizes: '512x512', type: 'image/png' },
+    ],
+    apple: [
+      { url: '/apple-touch-icon.png', sizes: '180x180', type: 'image/png' },
+    ],
   },
   formatDetection: {
     telephone: false,

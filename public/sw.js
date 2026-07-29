@@ -1,4 +1,4 @@
-const CACHE_NAME = 'financeos-pwa-v7'
+const CACHE_NAME = 'fluxoae-pwa-v8'
 const STATIC_ASSETS = [
   '/',
   '/planned',
@@ -7,9 +7,11 @@ const STATIC_ASSETS = [
   '/settings',
   '/credit-cards',
   '/assistant',
-  '/manifest.webmanifest',
-  '/icon',
-  '/apple-icon'
+  '/manifest.json',
+  '/icon-192.png',
+  '/icon-512.png',
+  '/apple-touch-icon.png',
+  '/favicon.png'
 ]
 
 // Install event: cache basic app shell
