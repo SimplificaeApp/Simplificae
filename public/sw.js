@@ -1,7 +1,7 @@
-const CACHE_NAME = 'fluxoae-pwa-v9'
+const CACHE_NAME = 'fluxoae-pwa-v11'
 const STATIC_ASSETS = [
   '/login',
-  '/manifest.json',
+  '/manifest.webmanifest',
   '/icon-192.png',
   '/icon-512.png',
   '/apple-touch-icon.png',
@@ -38,7 +38,7 @@ self.addEventListener('activate', (event) => {
   )
 })
 
-// Fetch event: Network-First with Cache Fallback for HTML navigation, Cache-First for static assets
+// Fetch event: Stale-While-Revalidate for ultra-fast HTML navigation (0ms launch), Cache-First for static assets
 self.addEventListener('fetch', (event) => {
   const { request } = event
   const url = new URL(request.url)
@@ -48,28 +48,42 @@ self.addEventListener('fetch', (event) => {
     return
   }
 
-  // Navigation / HTML requests
+  // Navigation / HTML requests -> Stale-While-Revalidate with redirect sanitization
   if (request.mode === 'navigate' || request.headers.get('accept')?.includes('text/html')) {
     event.respondWith(
       (async () => {
-        const cachedResponse = await caches.match(request)
-        const fetchPromise = fetch(request).then((response) => {
-          if (response && response.status === 200) {
-            const copy = response.clone()
-            caches.open(CACHE_NAME).then((cache) => cache.put(request, copy))
-          }
-          return response
-        }).catch(async () => {
-          if (cachedResponse) return cachedResponse
-          const rootFallback = await caches.match('/')
-          if (rootFallback) return rootFallback
-          return new Response(
-            `<!DOCTYPE html><html><head><meta charset="utf-8"/><title>FinanceOS Offline</title></head><body><h1>FinanceOS Offline</h1><p>Modo offline ativado.</p></body></html>`,
+        const cache = await caches.open(CACHE_NAME)
+        const cachedResponse = (await cache.match(request)) || (await cache.match('/login'))
+
+        // Background network refresh
+        const networkPromise = fetch(request)
+          .then((response) => {
+            // ONLY cache 200 OK non-redirected responses to prevent ERR_FAILED
+            if (response && response.status === 200 && !response.redirected) {
+              cache.put(request, response.clone())
+            }
+            return response
+          })
+          .catch(() => null)
+
+        // If we have a valid, non-redirected cached response, serve INSTANTLY (0ms)
+        if (cachedResponse && cachedResponse.status === 200 && !cachedResponse.redirected) {
+          event.waitUntil(networkPromise)
+          return cachedResponse
+        }
+
+        // Otherwise wait for network response
+        const networkResponse = await networkPromise
+        if (networkResponse) return networkResponse
+
+        // Offline fallback
+        return (
+          cachedResponse ||
+          new Response(
+            `<!DOCTYPE html><html><head><meta charset="utf-8"/><title>FluxoAÊ Offline</title></head><body><h1>FluxoAÊ Offline</h1><p>Sem conexão no momento.</p></body></html>`,
             { headers: { 'Content-Type': 'text/html' } }
           )
-        })
-
-        return cachedResponse || fetchPromise
+        )
       })()
     )
     return
