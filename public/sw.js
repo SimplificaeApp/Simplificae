@@ -1,6 +1,13 @@
-const CACHE_NAME = 'fluxoae-pwa-v12'
+const CACHE_NAME = 'fluxoae-pwa-v14'
 const STATIC_ASSETS = [
+  '/',
   '/login',
+  '/planned',
+  '/transactions',
+  '/accounts',
+  '/settings',
+  '/credit-cards',
+  '/assistant',
   '/manifest.webmanifest',
   '/icon-192.png',
   '/icon-512.png',
@@ -8,16 +15,19 @@ const STATIC_ASSETS = [
   '/favicon.png'
 ]
 
-// Install event: cache basic app shell safely
+// Install event: pre-cache all pages and static assets immediately
 self.addEventListener('install', (event) => {
   self.skipWaiting()
   event.waitUntil(
     caches.open(CACHE_NAME).then(async (cache) => {
       for (const asset of STATIC_ASSETS) {
         try {
-          await cache.add(asset)
+          const response = await fetch(asset)
+          if (response && (response.status === 200 || response.type === 'opaqueredirect')) {
+            await cache.put(asset, response)
+          }
         } catch (err) {
-          console.warn('Failed to cache asset:', asset, err)
+          console.warn('Pre-cache asset warning for:', asset, err)
         }
       }
     })
@@ -38,7 +48,7 @@ self.addEventListener('activate', (event) => {
   )
 })
 
-// Fetch event: Network First with offline fallback for HTML navigation
+// Fetch event: Cache-First / Network-First with Fallback (Behavior from commit 0c917d5)
 self.addEventListener('fetch', (event) => {
   const { request } = event
   const url = new URL(request.url)
@@ -52,49 +62,26 @@ self.addEventListener('fetch', (event) => {
   if (request.mode === 'navigate' || request.headers.get('accept')?.includes('text/html')) {
     event.respondWith(
       (async () => {
-        const cache = await caches.open(CACHE_NAME)
-        
-        // 1. Try network first when online
-        try {
-          const networkResponse = await fetch(request)
-          if (networkResponse && networkResponse.status === 200) {
-            cache.put(request, networkResponse.clone())
+        const cachedResponse = await caches.match(request)
+        const fetchPromise = fetch(request).then((response) => {
+          if (response && response.status === 200) {
+            const copy = response.clone()
+            caches.open(CACHE_NAME).then((cache) => cache.put(request, copy))
           }
-          return networkResponse
-        } catch (error) {
-          console.log('[SW] Rede indisponível, buscando no cache offline:', error)
-        }
+          return response
+        }).catch(async () => {
+          if (cachedResponse) return cachedResponse
+          const loginFallback = await caches.match('/login')
+          if (loginFallback) return loginFallback
+          const rootFallback = await caches.match('/')
+          if (rootFallback) return rootFallback
+          return new Response(
+            `<!DOCTYPE html><html><head><meta charset="utf-8"/><title>FluxoAÊ Offline</title></head><body><h1>FluxoAÊ Offline</h1><p>Modo offline ativado.</p></body></html>`,
+            { headers: { 'Content-Type': 'text/html' } }
+          )
+        })
 
-        // 2. Fallback to cache if offline
-        const cachedResponse = (await cache.match(request)) || (await cache.match('/login'))
-        if (cachedResponse) {
-          return cachedResponse
-        }
-
-        // 3. Clean offline screen if no cache available
-        return new Response(
-          `<!DOCTYPE html>
-          <html lang="pt-BR">
-            <head>
-              <meta charset="utf-8"/>
-              <meta name="viewport" content="width=device-width, initial-scale=1"/>
-              <title>FluxoAÊ - Offline</title>
-              <style>
-                body { font-family: system-ui, -apple-system, sans-serif; background: #0f172a; color: #fff; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; text-align: center; padding: 20px; }
-                .card { background: rgba(30, 41, 59, 0.9); border: 1px solid #334155; padding: 32px; border-radius: 24px; max-width: 360px; box-shadow: 0 20px 25px -5px rgba(0,0,0,0.5); }
-                h1 { color: #10b981; margin-top: 0; font-size: 20px; font-weight: 700; }
-                p { color: #94a3b8; font-size: 14px; margin-bottom: 0; line-height: 1.5; }
-              </style>
-            </head>
-            <body>
-              <div class="card">
-                <h1>Sem Conexão</h1>
-                <p>O FluxoAÊ precisa de conexão com a internet para sincronizar suas finanças. Reconecte-se para continuar.</p>
-              </div>
-            </body>
-          </html>`,
-          { headers: { 'Content-Type': 'text/html; charset=utf-8' } }
-        )
+        return cachedResponse || fetchPromise
       })()
     )
     return
@@ -113,9 +100,12 @@ self.addEventListener('fetch', (event) => {
           return response
         }).catch(async () => {
           if (cachedResponse) return cachedResponse
-          return Response.error()
+          return new Response('', {
+            status: 200,
+            headers: { 'Content-Type': 'text/x-component' }
+          })
         })
-        
+
         return cachedResponse || fetchPromise
       })()
     )
@@ -134,7 +124,7 @@ self.addEventListener('fetch', (event) => {
             caches.open(CACHE_NAME).then((cache) => cache.put(request, copy))
           }
           return response
-        })
+        }).catch(() => new Response('', { status: 404 }))
       })
     )
     return
