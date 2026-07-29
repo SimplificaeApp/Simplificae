@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { PiggyBank, Download, X, Share } from 'lucide-react'
+import { PiggyBank, Download, X, Share, MoreVertical } from 'lucide-react'
 
 export function PwaRegister() {
   const [deferredPrompt, setDeferredPrompt] = useState<any>(null)
@@ -34,9 +34,9 @@ export function PwaRegister() {
     const iosDevice = /iphone|ipad|ipod/.test(userAgent)
     setIsIos(iosDevice)
 
-    // If on iOS and not standalone, show iOS banner if not dismissed
+    // Always show banner for non-standalone users unless dismissed in this session
     const dismissed = sessionStorage.getItem('pwa_dismissed')
-    if (iosDevice && !inStandalone && !dismissed) {
+    if (!inStandalone && !dismissed) {
       setShowInstallBanner(true)
     }
 
@@ -57,12 +57,13 @@ export function PwaRegister() {
   }, [])
 
   const handleInstallClick = async () => {
-    if (!deferredPrompt) return
-    deferredPrompt.prompt()
-    const { outcome } = await deferredPrompt.userChoice
-    console.log('[PWA] Resultado da instalação:', outcome)
-    setDeferredPrompt(null)
-    setShowInstallBanner(false)
+    if (deferredPrompt) {
+      deferredPrompt.prompt()
+      const { outcome } = await deferredPrompt.userChoice
+      console.log('[PWA] Resultado da instalação:', outcome)
+      setDeferredPrompt(null)
+      setShowInstallBanner(false)
+    }
   }
 
   const handleDismiss = () => {
@@ -87,9 +88,9 @@ export function PwaRegister() {
               <PiggyBank className="w-6 h-6 text-white" strokeWidth={2.5} />
             </div>
             <div>
-              <h3 className="font-bold text-sm text-white">Instalar o FluxoAÊ</h3>
+              <h3 className="font-bold text-sm text-white">Instalar o App FluxoAÊ</h3>
               <p className="text-xs text-slate-300 mt-0.5">
-                Adicione à tela inicial para usar como um aplicativo nativo.
+                Use como um aplicativo nativo na sua tela de início.
               </p>
             </div>
           </div>
@@ -101,23 +102,28 @@ export function PwaRegister() {
           </button>
         </div>
 
-        {isIos ? (
+        {deferredPrompt ? (
+          <button
+            onClick={handleInstallClick}
+            className="mt-3 w-full bg-emerald-500 hover:bg-emerald-600 text-slate-950 font-bold py-2.5 px-4 rounded-xl flex items-center justify-center gap-2 text-xs transition-all shadow-lg shadow-emerald-500/20"
+          >
+            <Download className="w-4 h-4" />
+            Instalar Aplicativo Agora
+          </button>
+        ) : isIos ? (
           <div className="mt-3 pt-3 border-t border-slate-800 text-xs text-slate-300 flex items-center gap-2 bg-slate-800/50 p-2.5 rounded-xl">
             <Share className="w-4 h-4 text-emerald-400 shrink-0" />
             <span>
-              Toque em <strong>Compartilhar</strong> e selecione <strong>Adicionar à Tela de Início</strong>.
+              Toque em <strong>Compartilhar (📤)</strong> no Safari e escolha <strong>Adicionar à Tela de Início</strong>.
             </span>
           </div>
         ) : (
-          deferredPrompt && (
-            <button
-              onClick={handleInstallClick}
-              className="mt-3 w-full bg-emerald-500 hover:bg-emerald-600 text-slate-950 font-bold py-2.5 px-4 rounded-xl flex items-center justify-center gap-2 text-xs transition-all shadow-lg shadow-emerald-500/20"
-            >
-              <Download className="w-4 h-4" />
-              Instalar Aplicativo
-            </button>
-          )
+          <div className="mt-3 pt-3 border-t border-slate-800 text-xs text-slate-300 flex items-center gap-2 bg-slate-800/50 p-2.5 rounded-xl">
+            <MoreVertical className="w-4 h-4 text-emerald-400 shrink-0" />
+            <span>
+              Abra o menu do navegador (<strong>⋮</strong>) e escolha <strong>Instalar Aplicativo</strong> ou <strong>Adicionar à Tela Inicial</strong>.
+            </span>
+          </div>
         )}
       </motion.div>
     </AnimatePresence>
