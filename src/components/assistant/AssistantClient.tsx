@@ -109,10 +109,10 @@ function InsightCard({ insight, index }: { insight: FinancialInsight; index: num
 // Suggested Prompts
 // ──────────────────────────────────────────────
 const SUGGESTED_PROMPTS = [
+  { text: 'Como posso melhorar minhas finanças hoje?', icon: '💡' },
+  { text: 'O que você acha da minha situação financeira?', icon: '🎯' },
+  { text: 'Onde estão meus maiores ralos de dinheiro?', icon: '🔍' },
   { text: 'Como foram meus gastos esse mês?', icon: '📊' },
-  { text: 'Quanto gastei com alimentação nos últimos 3 meses?', icon: '🍕' },
-  { text: 'Estou no caminho certo para fechar o mês no positivo?', icon: '🎯' },
-  { text: 'Qual categoria mais consome meu dinheiro?', icon: '💸' },
 ]
 
 // ──────────────────────────────────────────────

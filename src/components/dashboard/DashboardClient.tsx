@@ -200,6 +200,10 @@ export function DashboardClient({
 
   const filteredTx = useMemo(() => {
     return transactions.filter(t => {
+      // ONLY include confirmed / posted transactions (exclude 'pending' / unconfirmed items)
+      const isConfirmed = t.status === 'posted' || t.status === 'paid_planned' || (t.status && t.status !== 'pending');
+      if (!isConfirmed) return false;
+
       if (selectedAccount !== "all" && t.account_id !== selectedAccount) return false;
       if (selectedCategory !== "all" && t.category_id !== selectedCategory) return false;
       return true;
