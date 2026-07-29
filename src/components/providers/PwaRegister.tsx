@@ -11,12 +11,13 @@ export function PwaRegister() {
   const [isStandalone, setIsStandalone] = useState(false)
 
   useEffect(() => {
-    // Register Service Worker
+    // Register Service Worker and force immediate update
     if (typeof window !== 'undefined' && 'serviceWorker' in navigator) {
       navigator.serviceWorker
         .register('/sw.js')
         .then((reg) => {
           console.log('[PWA] Service Worker registrado:', reg.scope)
+          reg.update()
         })
         .catch((err) => {
           console.error('[PWA] Erro no SW:', err)
