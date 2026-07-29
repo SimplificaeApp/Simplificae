@@ -1,4 +1,4 @@
-const CACHE_NAME = 'fluxoae-pwa-v15'
+const CACHE_NAME = 'fluxoae-pwa-v16'
 const STATIC_ASSETS = [
   '/',
   '/login',
@@ -15,14 +15,21 @@ const STATIC_ASSETS = [
   '/favicon.png'
 ]
 
-// Install event: cache basic app shell
+// Install event: pre-cache all pages and static assets
 self.addEventListener('install', (event) => {
   self.skipWaiting()
   event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => {
-      return cache.addAll(STATIC_ASSETS).catch((err) => {
-        console.warn('Failed to pre-cache some initial assets:', err)
-      })
+    caches.open(CACHE_NAME).then(async (cache) => {
+      for (const asset of STATIC_ASSETS) {
+        try {
+          const response = await fetch(asset)
+          if (response && (response.status === 200 || response.type === 'opaqueredirect')) {
+            await cache.put(asset, response)
+          }
+        } catch (err) {
+          console.warn('Pre-cache asset warning for:', asset, err)
+        }
+      }
     })
   )
 })
@@ -41,7 +48,7 @@ self.addEventListener('activate', (event) => {
   )
 })
 
-// Fetch event: Network-First with Cache Fallback for HTML navigation, Cache-First for static assets
+// Fetch event: Network-First with Cache Fallback for HTML navigation
 self.addEventListener('fetch', (event) => {
   const { request } = event
   const url = new URL(request.url)
@@ -55,26 +62,50 @@ self.addEventListener('fetch', (event) => {
   if (request.mode === 'navigate' || request.headers.get('accept')?.includes('text/html')) {
     event.respondWith(
       (async () => {
-        const cachedResponse = await caches.match(request)
-        const fetchPromise = fetch(request).then((response) => {
-          if (response && response.status === 200) {
-            const copy = response.clone()
-            caches.open(CACHE_NAME).then((cache) => cache.put(request, copy))
+        const cache = await caches.open(CACHE_NAME)
+        const cachedResponse = await cache.match(request)
+
+        try {
+          const networkResponse = await fetch(request)
+          if (networkResponse && networkResponse.status === 200) {
+            cache.put(request, networkResponse.clone())
           }
-          return response
-        }).catch(async () => {
+          return networkResponse
+        } catch (error) {
+          console.log('[SW] Offline navigation fallback:', error)
           if (cachedResponse) return cachedResponse
-          const loginFallback = await caches.match('/login')
-          if (loginFallback) return loginFallback
-          const rootFallback = await caches.match('/')
+          const rootFallback = (await cache.match('/')) || (await cache.match('/transactions')) || (await cache.match('/login'))
           if (rootFallback) return rootFallback
           return new Response(
-            `<!DOCTYPE html><html><head><meta charset="utf-8"/><title>FluxoAÊ Offline</title></head><body><h1>FluxoAÊ Offline</h1><p>Modo offline ativado.</p></body></html>`,
-            { headers: { 'Content-Type': 'text/html' } }
+            `<!DOCTYPE html>
+            <html lang="pt-BR">
+              <head>
+                <meta charset="utf-8"/>
+                <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"/>
+                <title>FluxoAÊ - Offline</title>
+                <style>
+                  * { box-sizing: border-box; }
+                  body { font-family: system-ui, -apple-system, sans-serif; background: #0f172a; color: #f8fafc; display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0; padding: 20px; }
+                  .card { background: #1e293b; border: 1px solid rgba(255,255,255,0.1); padding: 32px 24px; border-radius: 24px; max-width: 380px; width: 100%; text-align: center; box-shadow: 0 25px 50px -12px rgba(0,0,0,0.5); }
+                  .icon-box { width: 56px; height: 56px; background: linear-gradient(135deg, #10b981 0%, #059669 100%); border-radius: 16px; display: flex; align-items: center; justify-content: center; margin: 0 auto 20px; font-size: 28px; box-shadow: 0 10px 20px -5px rgba(16,185,129,0.3); }
+                  h1 { font-size: 20px; font-weight: 800; color: #ffffff; margin: 0 0 8px; }
+                  p { font-size: 14px; color: #94a3b8; margin: 0 0 24px; line-height: 1.5; }
+                  .btn { display: inline-flex; align-items: center; justify-content: center; width: 100%; padding: 12px 20px; background: #10b981; color: #022c22; font-weight: 700; font-size: 14px; border-radius: 12px; border: none; cursor: pointer; text-decoration: none; transition: all 0.2s; }
+                  .btn:hover { background: #34d399; }
+                </style>
+              </head>
+              <body>
+                <div class="card">
+                  <div class="icon-box">🐷</div>
+                  <h1>Modo Offline Ativado</h1>
+                  <p>Conecte-se à internet para sincronizar novos módulos ou navegar entre páginas não salvas.</p>
+                  <button onclick="window.history.back()" class="btn">Voltar para a tela anterior</button>
+                </div>
+              </body>
+            </html>`,
+            { headers: { 'Content-Type': 'text/html; charset=utf-8' } }
           )
-        })
-
-        return cachedResponse || fetchPromise
+        }
       })()
     )
     return
@@ -84,19 +115,22 @@ self.addEventListener('fetch', (event) => {
   if (request.headers.get('RSC') === '1' || url.searchParams.has('_rsc')) {
     event.respondWith(
       (async () => {
-        const cachedResponse = await caches.match(request)
-        const fetchPromise = fetch(request).then((response) => {
-          if (response && response.status === 200) {
-            const copy = response.clone()
-            caches.open(CACHE_NAME).then((cache) => cache.put(request, copy))
+        const cache = await caches.open(CACHE_NAME)
+        const cachedResponse = await cache.match(request)
+
+        try {
+          const networkResponse = await fetch(request)
+          if (networkResponse && networkResponse.status === 200) {
+            cache.put(request, networkResponse.clone())
           }
-          return response
-        }).catch(async () => {
+          return networkResponse
+        } catch (err) {
           if (cachedResponse) return cachedResponse
-          return Response.error()
-        })
-        
-        return cachedResponse || fetchPromise
+          return new Response('', {
+            status: 200,
+            headers: { 'Content-Type': 'text/x-component' }
+          })
+        }
       })()
     )
     return
@@ -105,17 +139,21 @@ self.addEventListener('fetch', (event) => {
   // Static Next.js assets (_next/static, fonts, icons) -> Cache First
   if (url.pathname.startsWith('/_next/') || url.pathname.match(/\.(png|jpg|jpeg|svg|gif|ico|css|js)$/)) {
     event.respondWith(
-      caches.match(request).then((cachedResponse) => {
+      (async () => {
+        const cache = await caches.open(CACHE_NAME)
+        const cachedResponse = await cache.match(request)
         if (cachedResponse) return cachedResponse
 
-        return fetch(request).then((response) => {
-          if (response && response.status === 200) {
-            const copy = response.clone()
-            caches.open(CACHE_NAME).then((cache) => cache.put(request, copy))
+        try {
+          const networkResponse = await fetch(request)
+          if (networkResponse && networkResponse.status === 200) {
+            cache.put(request, networkResponse.clone())
           }
-          return response
-        })
-      })
+          return networkResponse
+        } catch (err) {
+          return new Response('', { status: 404 })
+        }
+      })()
     )
     return
   }

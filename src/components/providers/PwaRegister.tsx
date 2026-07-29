@@ -21,6 +21,17 @@ export function PwaRegister() {
         .catch((err) => {
           console.error('[PWA] Erro no SW:', err)
         })
+
+      // Background pre-cache ALL routes and RSC payloads for 100% offline navigation
+      if (navigator.onLine) {
+        setTimeout(() => {
+          const routes = ['/', '/transactions', '/accounts', '/planned', '/credit-cards', '/settings', '/assistant']
+          routes.forEach(route => {
+            fetch(route, { headers: { 'RSC': '1' } }).catch(() => {})
+            fetch(route).catch(() => {})
+          })
+        }, 1500)
+      }
     }
 
     if (typeof window === 'undefined') return
