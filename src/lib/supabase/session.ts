@@ -7,6 +7,12 @@ export async function updateSession(request: NextRequest) {
   })
 
   const pathname = request.nextUrl.pathname
+
+  // Fast-path: NEVER run auth redirect on PWA static assets or manifest files
+  if (pathname === '/manifest.json' || pathname === '/manifest.webmanifest' || pathname === '/sw.js' || pathname.endsWith('.png') || pathname.endsWith('.ico') || pathname.endsWith('.json')) {
+    return supabaseResponse
+  }
+
   const isAuthPage = pathname === '/login' || pathname === '/register' || pathname.startsWith('/forgot-password') || pathname.startsWith('/reset-password')
   const isApiRoute = pathname.startsWith('/api')
 
