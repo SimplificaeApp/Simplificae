@@ -1,12 +1,6 @@
-const CACHE_NAME = 'fluxoae-pwa-v8'
+const CACHE_NAME = 'fluxoae-pwa-v9'
 const STATIC_ASSETS = [
-  '/',
-  '/planned',
-  '/transactions',
-  '/accounts',
-  '/settings',
-  '/credit-cards',
-  '/assistant',
+  '/login',
   '/manifest.json',
   '/icon-192.png',
   '/icon-512.png',
@@ -14,14 +8,18 @@ const STATIC_ASSETS = [
   '/favicon.png'
 ]
 
-// Install event: cache basic app shell
+// Install event: cache basic app shell safely
 self.addEventListener('install', (event) => {
   self.skipWaiting()
   event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => {
-      return cache.addAll(STATIC_ASSETS).catch((err) => {
-        console.warn('Failed to pre-cache some initial assets:', err)
-      })
+    caches.open(CACHE_NAME).then(async (cache) => {
+      for (const asset of STATIC_ASSETS) {
+        try {
+          await cache.add(asset)
+        } catch (err) {
+          console.warn('Failed to cache asset:', asset, err)
+        }
+      }
     })
   )
 })
