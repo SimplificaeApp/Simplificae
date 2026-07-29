@@ -1,4 +1,4 @@
-const CACHE_NAME = 'fluxoae-pwa-v11'
+const CACHE_NAME = 'fluxoae-pwa-v12'
 const STATIC_ASSETS = [
   '/login',
   '/manifest.webmanifest',
@@ -38,7 +38,7 @@ self.addEventListener('activate', (event) => {
   )
 })
 
-// Fetch event: Stale-While-Revalidate for ultra-fast HTML navigation (0ms launch), Cache-First for static assets
+// Fetch event: Network First with offline fallback for HTML navigation
 self.addEventListener('fetch', (event) => {
   const { request } = event
   const url = new URL(request.url)
@@ -48,41 +48,52 @@ self.addEventListener('fetch', (event) => {
     return
   }
 
-  // Navigation / HTML requests -> Stale-While-Revalidate with redirect sanitization
+  // Navigation / HTML requests
   if (request.mode === 'navigate' || request.headers.get('accept')?.includes('text/html')) {
     event.respondWith(
       (async () => {
         const cache = await caches.open(CACHE_NAME)
+        
+        // 1. Try network first when online
+        try {
+          const networkResponse = await fetch(request)
+          if (networkResponse && networkResponse.status === 200) {
+            cache.put(request, networkResponse.clone())
+          }
+          return networkResponse
+        } catch (error) {
+          console.log('[SW] Rede indisponível, buscando no cache offline:', error)
+        }
+
+        // 2. Fallback to cache if offline
         const cachedResponse = (await cache.match(request)) || (await cache.match('/login'))
-
-        // Background network refresh
-        const networkPromise = fetch(request)
-          .then((response) => {
-            // ONLY cache 200 OK non-redirected responses to prevent ERR_FAILED
-            if (response && response.status === 200 && !response.redirected) {
-              cache.put(request, response.clone())
-            }
-            return response
-          })
-          .catch(() => null)
-
-        // If we have a valid, non-redirected cached response, serve INSTANTLY (0ms)
-        if (cachedResponse && cachedResponse.status === 200 && !cachedResponse.redirected) {
-          event.waitUntil(networkPromise)
+        if (cachedResponse) {
           return cachedResponse
         }
 
-        // Otherwise wait for network response
-        const networkResponse = await networkPromise
-        if (networkResponse) return networkResponse
-
-        // Offline fallback
-        return (
-          cachedResponse ||
-          new Response(
-            `<!DOCTYPE html><html><head><meta charset="utf-8"/><title>FluxoAÊ Offline</title></head><body><h1>FluxoAÊ Offline</h1><p>Sem conexão no momento.</p></body></html>`,
-            { headers: { 'Content-Type': 'text/html' } }
-          )
+        // 3. Clean offline screen if no cache available
+        return new Response(
+          `<!DOCTYPE html>
+          <html lang="pt-BR">
+            <head>
+              <meta charset="utf-8"/>
+              <meta name="viewport" content="width=device-width, initial-scale=1"/>
+              <title>FluxoAÊ - Offline</title>
+              <style>
+                body { font-family: system-ui, -apple-system, sans-serif; background: #0f172a; color: #fff; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; text-align: center; padding: 20px; }
+                .card { background: rgba(30, 41, 59, 0.9); border: 1px solid #334155; padding: 32px; border-radius: 24px; max-width: 360px; box-shadow: 0 20px 25px -5px rgba(0,0,0,0.5); }
+                h1 { color: #10b981; margin-top: 0; font-size: 20px; font-weight: 700; }
+                p { color: #94a3b8; font-size: 14px; margin-bottom: 0; line-height: 1.5; }
+              </style>
+            </head>
+            <body>
+              <div class="card">
+                <h1>Sem Conexão</h1>
+                <p>O FluxoAÊ precisa de conexão com a internet para sincronizar suas finanças. Reconecte-se para continuar.</p>
+              </div>
+            </body>
+          </html>`,
+          { headers: { 'Content-Type': 'text/html; charset=utf-8' } }
         )
       })()
     )
