@@ -1,8 +1,8 @@
 {
-  "name": "FluxoAÊ - Copiloto Financeiro",
+  "name": "FluxoAÊ - Gestão Financeira",
   "short_name": "FluxoAÊ",
   "description": "Aplicativo completo para gestão financeira empresarial e pessoal.",
-  "start_url": "/",
+  "start_url": "/login",
   "display": "standalone",
   "orientation": "portrait",
   "background_color": "#f8fafc",
