@@ -8,6 +8,8 @@ import { motion, AnimatePresence } from "framer-motion";
 import Link from "next/link";
 import { toast } from "sonner";
 
+import { useSync } from "@/components/providers/SyncProvider";
+
 const PAGE_LABELS: Record<string, { label: string; icon: any }> = {
   '/': { label: 'Dashboard', icon: LayoutDashboard },
   '/transactions': { label: 'Transações', icon: ArrowRightLeft },
@@ -29,6 +31,7 @@ const navItems = [
 
 export function Header({ workspaces = [], user }: { workspaces?: any[], user?: any }) {
   const pathname = usePathname();
+  const { isOnline } = useSync();
   const [isPending, startTransition] = useTransition();
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -86,16 +89,18 @@ export function Header({ workspaces = [], user }: { workspaces?: any[], user?: a
 
         {/* User area */}
         <div className="flex items-center gap-2.5 sm:gap-3">
-          {/* Botão Recarregar / Limpar Cache */}
-          <button
-            onClick={handleRefreshApp}
-            disabled={isRefreshing}
-            className="flex items-center gap-1.5 text-xs font-semibold text-slate-600 hover:text-emerald-600 transition-colors bg-slate-100/90 hover:bg-emerald-50 border border-slate-200/60 px-2.5 py-1.5 rounded-lg disabled:opacity-50"
-            title="Recarregar aplicativo e limpar cache"
-          >
-            <RefreshCw className={`w-3.5 h-3.5 ${isRefreshing ? 'animate-spin text-emerald-600' : ''}`} />
-            <span className="hidden sm:inline">Atualizar</span>
-          </button>
+          {/* Botão Recarregar / Limpar Cache - Apenas quando Online */}
+          {isOnline && (
+            <button
+              onClick={handleRefreshApp}
+              disabled={isRefreshing}
+              className="flex items-center gap-1.5 text-xs font-semibold text-slate-600 hover:text-emerald-600 transition-colors bg-slate-100/90 hover:bg-emerald-50 border border-slate-200/60 px-2.5 py-1.5 rounded-lg disabled:opacity-50"
+              title="Recarregar aplicativo e limpar cache"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${isRefreshing ? 'animate-spin text-emerald-600' : ''}`} />
+              <span className="hidden sm:inline">Atualizar</span>
+            </button>
+          )}
 
           <span className="text-sm text-slate-500 hidden sm:block">
             Olá, <span className="font-bold text-slate-800">{firstName}</span>

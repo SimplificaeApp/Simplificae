@@ -1,4 +1,4 @@
-const CACHE_NAME = 'fluxoae-pwa-v14'
+const CACHE_NAME = 'fluxoae-pwa-v15'
 const STATIC_ASSETS = [
   '/',
   '/login',
@@ -15,21 +15,14 @@ const STATIC_ASSETS = [
   '/favicon.png'
 ]
 
-// Install event: pre-cache all pages and static assets immediately
+// Install event: cache basic app shell
 self.addEventListener('install', (event) => {
   self.skipWaiting()
   event.waitUntil(
-    caches.open(CACHE_NAME).then(async (cache) => {
-      for (const asset of STATIC_ASSETS) {
-        try {
-          const response = await fetch(asset)
-          if (response && (response.status === 200 || response.type === 'opaqueredirect')) {
-            await cache.put(asset, response)
-          }
-        } catch (err) {
-          console.warn('Pre-cache asset warning for:', asset, err)
-        }
-      }
+    caches.open(CACHE_NAME).then((cache) => {
+      return cache.addAll(STATIC_ASSETS).catch((err) => {
+        console.warn('Failed to pre-cache some initial assets:', err)
+      })
     })
   )
 })
@@ -48,7 +41,7 @@ self.addEventListener('activate', (event) => {
   )
 })
 
-// Fetch event: Cache-First / Network-First with Fallback (Behavior from commit 0c917d5)
+// Fetch event: Network-First with Cache Fallback for HTML navigation, Cache-First for static assets
 self.addEventListener('fetch', (event) => {
   const { request } = event
   const url = new URL(request.url)
@@ -100,12 +93,9 @@ self.addEventListener('fetch', (event) => {
           return response
         }).catch(async () => {
           if (cachedResponse) return cachedResponse
-          return new Response('', {
-            status: 200,
-            headers: { 'Content-Type': 'text/x-component' }
-          })
+          return Response.error()
         })
-
+        
         return cachedResponse || fetchPromise
       })()
     )
@@ -124,7 +114,7 @@ self.addEventListener('fetch', (event) => {
             caches.open(CACHE_NAME).then((cache) => cache.put(request, copy))
           }
           return response
-        }).catch(() => new Response('', { status: 404 }))
+        })
       })
     )
     return
