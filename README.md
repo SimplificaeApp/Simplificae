@@ -1,7 +1,8 @@
-# Financeiro APP
+# FluxoAÊ (Financeiro APP)
 
 ## Descrição Curta
-Aplicativo completo para gestão financeira empresarial e pessoal, integrado como um produto do ecossistema Simplificae.
+Aplicativo completo para gestão financeira empresarial e pessoal, integrado como um produto do ecossistema SimplificAE.
+
 
 ## Stack Principal
 - Next.js 15+ (App Router)

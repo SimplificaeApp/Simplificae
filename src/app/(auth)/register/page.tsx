@@ -33,7 +33,7 @@ export default function RegisterPage() {
         <h1 className="text-3xl font-black text-slate-800 tracking-tight mb-2">
           Criar Conta
         </h1>
-        <p className="text-sm text-slate-500 font-medium">Junte-se ao FinanceOS e transforme suas finanças.</p>
+        <p className="text-sm text-slate-500 font-medium">Junte-se ao FluxoAÊ e transforme suas finanças.</p>
       </div>
 
       <form action={formAction} className="flex flex-col gap-5">

@@ -46,7 +46,7 @@ export function Sidebar() {
           </div>
           <div>
             <h2 className="text-base font-black text-slate-800 tracking-tight leading-none">
-              Finance<span className="text-emerald-500">OS</span>
+              Fluxo<span className="text-emerald-500">AÊ</span>
             </h2>
             <p className="text-[9px] font-semibold text-slate-400 tracking-widest uppercase mt-0.5">
               Copiloto Financeiro

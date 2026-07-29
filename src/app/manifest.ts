@@ -2,8 +2,8 @@ import { MetadataRoute } from 'next'
 
 export default function manifest(): MetadataRoute.Manifest {
   return {
-    name: 'FinanceOS Copiloto Financeiro',
-    short_name: 'FinanceOS',
+    name: 'FluxoAÊ Copiloto Financeiro',
+    short_name: 'FluxoAÊ',
     description: 'Seu copiloto financeiro inteligente e avançado.',
     start_url: '/',
     display: 'standalone',

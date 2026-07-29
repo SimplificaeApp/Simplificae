@@ -678,7 +678,7 @@ export function AssistantClient() {
               className="flex flex-col items-center justify-center h-full text-center gap-8 py-10"
             >
               <div className="mt-auto">
-                <h3 className="font-black text-transparent bg-clip-text bg-gradient-to-r from-violet-600 to-indigo-600 text-3xl mb-2 tracking-tight">FinanceOS AI</h3>
+                <h3 className="font-black text-transparent bg-clip-text bg-gradient-to-r from-violet-600 to-indigo-600 text-3xl mb-2 tracking-tight">FluxoAÊ AI</h3>
                 <p className="text-slate-500 font-medium">No que posso ajudar você hoje?</p>
               </div>
 
@@ -777,7 +777,7 @@ export function AssistantClient() {
             </button>
           </div>
           <p className="text-center text-[10px] text-slate-400 mt-2 font-medium">
-            FinanceOS AI pode cometer erros. Confira valores importantes nos relatórios.
+            FluxoAÊ AI pode cometer erros. Confira valores importantes nos relatórios.
           </p>
         </div>
       </div>

@@ -103,7 +103,7 @@ export function Header({ workspaces = [], user }: { workspaces?: any[], user?: a
                     <PiggyBank className="w-4 h-4 text-white" strokeWidth={2.5} />
                   </div>
                   <div>
-                    <h2 className="text-base font-black text-slate-800 tracking-tight leading-none">Finance<span className="text-emerald-500">OS</span></h2>
+                    <h2 className="text-base font-black text-slate-800 tracking-tight leading-none">Fluxo<span className="text-emerald-500">AÊ</span></h2>
                     <p className="text-[9px] font-semibold text-slate-400 tracking-widest uppercase mt-0.5">Copiloto Financeiro</p>
                   </div>
                 </div>
