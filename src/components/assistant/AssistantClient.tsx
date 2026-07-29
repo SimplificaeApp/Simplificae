@@ -507,7 +507,7 @@ export function AssistantClient() {
 
   const { messages, sendMessage, setMessages, status, error } = useChat({
     transport: new DefaultChatTransport({ api: '/api/chat' }),
-    maxSteps: 5,
+    maxSteps: 3,
   } as any)
   const invalidateData = useInvalidateFinancialData()
 

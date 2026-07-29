@@ -155,7 +155,7 @@ Nota: O campo "insight" do resultado da ferramenta é apenas um resumo auxiliar 
       model: google('gemini-3.5-flash-lite'),
       system: systemPrompt,
       messages: aiMessages,
-      maxSteps: 8,
+      maxSteps: 3,
       tools: {
         /**
          * Busca o resumo financeiro de um mês:

@@ -96,48 +96,49 @@ function InvoiceRow({
                 <div 
                   key={t.id} 
                   onClick={() => onSelect(t)}
-                  className="flex items-center justify-between py-2.5 group cursor-pointer hover:bg-slate-50/80 -mx-2 px-2 rounded-lg transition-colors"
+                  className="flex items-start gap-3 py-2.5 group cursor-pointer hover:bg-slate-50/80 -mx-2 px-2 rounded-lg transition-colors"
                 >
-                  <div className="flex items-center gap-3 flex-1 min-w-0">
-                    <div className="w-8 h-8 rounded-lg bg-slate-100 flex items-center justify-center shrink-0">
-                      {t.category?.icon ? (
-                        <span className="text-sm">{t.category.icon}</span>
-                      ) : (
-                        <CreditCard className="w-4 h-4 text-slate-500" />
-                      )}
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <div className="text-xs sm:text-sm font-bold text-slate-800 truncate flex items-center gap-1.5">
+                  <div className="w-8 h-8 rounded-lg bg-slate-100 flex items-center justify-center shrink-0 mt-0.5">
+                    {t.category?.icon ? (
+                      <span className="text-sm">{t.category.icon}</span>
+                    ) : (
+                      <CreditCard className="w-4 h-4 text-slate-500" />
+                    )}
+                  </div>
+                  <div className="min-w-0 flex-1 space-y-0.5">
+                    <div className="flex items-baseline justify-between gap-2 min-w-0">
+                      <p className="text-xs sm:text-sm font-bold text-slate-800 truncate min-w-0 flex-1">
                         {t.description}
+                      </p>
+                      <span className={`text-xs sm:text-sm font-bold tabular-nums whitespace-nowrap shrink-0 ${t.ignore_in_cashflow ? 'text-slate-400 line-through' : 'text-rose-600'}`}>
+                        - {currencyFmt.format(Number(t.amount))}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between text-[11px] text-slate-400 font-medium min-w-0">
+                      <div className="flex items-center gap-1.5 min-w-0 flex-1">
+                        <span className="truncate max-w-[120px] sm:max-w-none">{t.category?.name || 'Sem Categoria'}</span>
+                        <span>· {new Date(t.date + 'T12:00:00').toLocaleDateString('pt-BR')}</span>
                         {t.installment_id && (
                           <span className="px-1.5 py-0.2 rounded text-[9px] font-bold bg-slate-100 text-slate-600 shrink-0">Parcelado</span>
                         )}
                       </div>
-                      <div className="text-[11px] text-slate-400 font-medium truncate">
-                        {t.category?.name || 'Sem Categoria'} · {new Date(t.date + 'T12:00:00').toLocaleDateString('pt-BR')}
+                      <div className="flex items-center gap-0.5 opacity-90 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity shrink-0">
+                        <button
+                          onClick={(e) => { e.stopPropagation(); onSelect(t); }}
+                          className="p-1 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-all"
+                          title="Editar / Ver Detalhes"
+                        >
+                          <Edit2 className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          onClick={(e) => { e.stopPropagation(); onDelete(t.id); }}
+                          disabled={isPending}
+                          className="p-1 text-slate-400 hover:text-rose-600 hover:bg-rose-100 rounded-lg transition-all disabled:opacity-50"
+                          title="Excluir"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
                       </div>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-2 sm:gap-3 ml-2 sm:ml-4">
-                    <span className={`text-xs sm:text-sm font-bold tabular-nums whitespace-nowrap ${t.ignore_in_cashflow ? 'text-slate-400 line-through' : 'text-rose-600'}`}>
-                      - {currencyFmt.format(Number(t.amount))}
-                    </span>
-                    <div className="flex items-center gap-1 opacity-100 lg:opacity-0 lg:group-hover:opacity-100 transition-opacity">
-                      <button
-                        onClick={(e) => { e.stopPropagation(); onSelect(t); }}
-                        className="p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-all"
-                        title="Editar / Ver Detalhes"
-                      >
-                        <Edit2 className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
-                      </button>
-                      <button
-                        onClick={(e) => { e.stopPropagation(); onDelete(t.id); }}
-                        disabled={isPending}
-                        className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-100 rounded-lg transition-all disabled:opacity-50"
-                        title="Excluir"
-                      >
-                        <Trash2 className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
-                      </button>
                     </div>
                   </div>
                 </div>
@@ -172,96 +173,99 @@ function TransactionRow({
   return (
     <div
       onClick={() => onSelect(t)}
-      className={`flex items-center justify-between px-4 sm:px-5 py-3 sm:py-3.5 border-b border-slate-50 cursor-pointer hover:bg-slate-100/70 transition-all group ${
+      className={`flex items-start gap-3 px-4 sm:px-5 py-3 sm:py-3.5 border-b border-slate-50 cursor-pointer hover:bg-slate-100/70 transition-all group ${
         isPlanned ? 'border-l-2 border-l-amber-400 bg-amber-50/20 hover:bg-amber-50/40' : ''
       }`}
     >
-      <div className="flex items-center gap-3 flex-1 min-w-0">
-        <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${
-          isTransfer ? 'bg-blue-50' : isIncome ? 'bg-emerald-50' : 'bg-rose-50'
-        }`}>
-          {t.category?.icon ? (
-            <span className="text-base">{t.category.icon}</span>
-          ) : isTransfer ? (
-            <ArrowRightLeft className="w-4 h-4 text-blue-600" />
-          ) : isIncome ? (
-            <TrendingUp className="w-4 h-4 text-emerald-600" />
-          ) : (
-            <TrendingDown className="w-4 h-4 text-rose-600" />
-          )}
-        </div>
-        <div className="min-w-0 flex-1">
-          <div className="font-semibold text-slate-800 text-sm truncate flex items-center gap-2">
+      <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 mt-0.5 ${
+        isTransfer ? 'bg-blue-50' : isIncome ? 'bg-emerald-50' : 'bg-rose-50'
+      }`}>
+        {t.category?.icon ? (
+          <span className="text-base">{t.category.icon}</span>
+        ) : isTransfer ? (
+          <ArrowRightLeft className="w-4 h-4 text-blue-600" />
+        ) : isIncome ? (
+          <TrendingUp className="w-4 h-4 text-emerald-600" />
+        ) : (
+          <TrendingDown className="w-4 h-4 text-rose-600" />
+        )}
+      </div>
+
+      <div className="min-w-0 flex-1 space-y-1">
+        <div className="flex items-baseline justify-between gap-2 min-w-0">
+          <p className="font-bold text-slate-800 text-xs sm:text-sm truncate min-w-0 flex-1">
             {t.description}
+          </p>
+          <span className={`font-black text-xs sm:text-sm tabular-nums whitespace-nowrap shrink-0 ${
+            t.ignore_in_cashflow ? 'text-slate-400 line-through' :
+            isPlanned ? 'text-amber-600' :
+            isTransfer ? 'text-blue-600' : isIncome ? 'text-emerald-600' : 'text-rose-600'
+          }`}>
+            {isIncome ? '+' : isTransfer ? '' : '-'} {currencyFmt.format(Number(t.amount))}
+          </span>
+        </div>
+
+        <div className="flex items-center justify-between gap-2 min-w-0 text-xs text-slate-400">
+          <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 min-w-0 flex-1">
+            <span className="font-medium text-slate-500 truncate max-w-[120px] sm:max-w-none">
+              {t.category?.name || (isTransfer ? 'Transferência' : 'Geral')}
+            </span>
+            {t.account?.name && <span className="shrink-0 font-medium">· {t.account.name}</span>}
             {isPlanned && (
-              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-700 shrink-0">
-                <CalendarDays className="w-3 h-3" /> Planejado
+              <span className="inline-flex items-center gap-1 px-1.5 py-0.2 rounded text-[9.5px] font-extrabold bg-amber-100 text-amber-700 shrink-0 border border-amber-200/60">
+                <CalendarDays className="w-2.5 h-2.5" /> Planejado
               </span>
             )}
             {t.installment_id && (
-              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-purple-100 text-purple-700 shrink-0">
-                <Layers className="w-3 h-3" /> Parcelado
+              <span className="inline-flex items-center gap-1 px-1.5 py-0.2 rounded text-[9.5px] font-extrabold bg-purple-100 text-purple-700 shrink-0 border border-purple-200/60">
+                <Layers className="w-2.5 h-2.5" /> Parcelado
               </span>
             )}
             {t.ignore_in_cashflow && (
-              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-slate-100 text-slate-500 shrink-0">
-                <EyeOff className="w-3 h-3" /> Ignorado
+              <span className="inline-flex items-center gap-1 px-1.5 py-0.2 rounded text-[9.5px] font-extrabold bg-slate-100 text-slate-500 shrink-0 border border-slate-200/60">
+                <EyeOff className="w-2.5 h-2.5" /> Ignorado
               </span>
             )}
           </div>
-          <div className="text-xs text-slate-400 mt-0.5 truncate">
-            {t.category?.name || (isTransfer ? 'Transferência' : '')}
-            {t.account?.name && ` · ${t.account.name}`}
+
+          <div className="flex items-center gap-0.5 shrink-0 opacity-90 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity">
+            {isPlanned ? (
+              <button
+                onClick={(e) => { e.stopPropagation(); onMarkPosted(t.id); }}
+                disabled={isPending}
+                className="p-1 text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg transition-all disabled:opacity-50"
+                title="Marcar como Efetivada / Paga"
+              >
+                <CheckCircle2 className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+              </button>
+            ) : (
+              <button
+                onClick={(e) => { e.stopPropagation(); onUnpay(t.id); }}
+                disabled={isPending}
+                className="p-1 text-slate-400 hover:text-amber-600 hover:bg-amber-50 rounded-lg transition-all disabled:opacity-50"
+                title="Voltar para Pendente / Planejado"
+              >
+                <RotateCcw className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+              </button>
+            )}
+
+            <button
+              onClick={(e) => { e.stopPropagation(); onSelect(t); }}
+              className="p-1 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-all"
+              title="Editar / Detalhes"
+            >
+              <Edit2 className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+            </button>
+
+            <button
+              onClick={(e) => { e.stopPropagation(); onDelete(t.id); }}
+              disabled={isPending}
+              className="p-1 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-all disabled:opacity-50"
+              title="Excluir"
+            >
+              <Trash2 className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+            </button>
           </div>
-        </div>
-      </div>
-
-      <div className="flex items-center gap-2 sm:gap-3 ml-2 sm:ml-4">
-        <div className={`font-bold text-xs sm:text-sm tabular-nums whitespace-nowrap ${
-          t.ignore_in_cashflow ? 'text-slate-400 line-through' :
-          isPlanned ? 'text-amber-600' :
-          isTransfer ? 'text-blue-600' : isIncome ? 'text-emerald-600' : 'text-rose-600'
-        }`}>
-          {isIncome ? '+' : isTransfer ? '' : '-'} {currencyFmt.format(Number(t.amount))}
-        </div>
-        
-        <div className="flex items-center gap-1 opacity-100 lg:opacity-0 lg:group-hover:opacity-100 transition-opacity">
-          {isPlanned ? (
-            <button
-              onClick={(e) => { e.stopPropagation(); onMarkPosted(t.id); }}
-              disabled={isPending}
-              className="p-1.5 text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg transition-all disabled:opacity-50"
-              title="Marcar como Efetivada / Paga"
-            >
-              <CheckCircle2 className="w-4 h-4" />
-            </button>
-          ) : (
-            <button
-              onClick={(e) => { e.stopPropagation(); onUnpay(t.id); }}
-              disabled={isPending}
-              className="p-1.5 text-slate-400 hover:text-amber-600 hover:bg-amber-50 rounded-lg transition-all disabled:opacity-50"
-              title="Voltar para Pendente / Planejado"
-            >
-              <RotateCcw className="w-4 h-4" />
-            </button>
-          )}
-
-          <button
-            onClick={(e) => { e.stopPropagation(); onSelect(t); }}
-            className="p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-all"
-            title="Editar / Detalhes"
-          >
-            <Edit2 className="w-4 h-4" />
-          </button>
-
-          <button
-            onClick={(e) => { e.stopPropagation(); onDelete(t.id); }}
-            disabled={isPending}
-            className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-all disabled:opacity-50"
-            title="Excluir"
-          >
-            <Trash2 className="w-4 h-4" />
-          </button>
         </div>
       </div>
     </div>

@@ -31,7 +31,7 @@ export function QueryProvider({ children }: QueryProviderProps) {
           queries: {
             staleTime: Infinity, // Keep cached data fresh indefinitely unless explicitly invalidated
             gcTime: 1000 * 60 * 60 * 24, // Keep unused data in cache for 24 hours
-            refetchOnWindowFocus: true, // Revalidate when user returns to app tab
+            refetchOnWindowFocus: false, // Prevent query spam when switching tabs/windows
             refetchOnReconnect: true, // Revalidate when internet connection is restored
             retry: 1,
             networkMode: 'offlineFirst', // Allow queries and mutations to be paused when offline instead of failing

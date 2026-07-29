@@ -621,8 +621,14 @@ export function DashboardClient({
     return null
   }
 
-  // Recent 5 transactions (from filteredTx, including credit cards)
-  const recentTx = filteredTx.slice(0, 5);
+  // Recent 5 transactions up to today (from filteredTx, excluding future installments)
+  const recentTx = useMemo(() => {
+    const todayStr = new Date().toISOString().split('T')[0];
+    return filteredTx
+      .filter(t => t.date <= todayStr)
+      .sort((a, b) => new Date(b.date + 'T12:00:00').getTime() - new Date(a.date + 'T12:00:00').getTime())
+      .slice(0, 5);
+  }, [filteredTx]);
   const hasData = filteredTx.length > 0;
 
   const fadeUp = {
@@ -1014,9 +1020,9 @@ export function DashboardClient({
                 return (
                   <div
                     key={t.id}
-                    className="flex justify-between items-center py-3 group hover:bg-slate-50/60 -mx-2 px-2 rounded-xl transition-all"
+                    className="flex justify-between items-center py-3 group hover:bg-slate-50/60 -mx-2 px-2 rounded-xl transition-all gap-3"
                   >
-                    <div className="flex items-center gap-3 min-w-0">
+                    <div className="flex items-center gap-3 min-w-0 flex-1 pr-1">
                       <div
                         className={`w-9 h-9 rounded-xl flex items-center justify-center text-base shrink-0 ${isTransfer
                           ? "bg-blue-50 text-blue-600"
@@ -1035,16 +1041,16 @@ export function DashboardClient({
                           <TrendingDown className="w-4 h-4" />
                         )}
                       </div>
-                      <div className="min-w-0">
+                      <div className="min-w-0 flex-1">
                         <div className="font-bold text-slate-800 text-xs sm:text-sm truncate">{t.description}</div>
-                        <div className="text-[11px] text-slate-400 font-semibold truncate flex items-center gap-1">
-                          <span>{t.category?.name || (isTransfer ? "Pagamento de Fatura" : "Geral")}</span>
+                        <div className="text-[11px] text-slate-400 font-semibold flex flex-wrap items-center gap-x-1.5 gap-y-0.5 mt-0.5 leading-tight">
+                          <span className="truncate max-w-[140px] sm:max-w-none">{t.category?.name || (isTransfer ? "Pagamento de Fatura" : "Geral")}</span>
                           {acc && acc.type === 'credit_card' && (
                             <span className="text-[10px] font-bold text-slate-600 bg-slate-100 border border-slate-200/80 px-1.5 py-0.2 rounded-md inline-flex items-center gap-1 shrink-0">
                               💳 {acc.name}
                             </span>
                           )}
-                          <span>· {new Date(t.date + "T12:00:00").toLocaleDateString("pt-BR")}</span>
+                          <span className="shrink-0">· {new Date(t.date + "T12:00:00").toLocaleDateString("pt-BR")}</span>
                         </div>
                       </div>
                     </div>
