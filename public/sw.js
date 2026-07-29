@@ -1,7 +1,6 @@
-const CACHE_NAME = 'fluxoae-pwa-v18'
+const CACHE_NAME = 'fluxoae-pwa-v19'
 const STATIC_ASSETS = [
   '/',
-  '/login',
   '/planned',
   '/transactions',
   '/accounts',
@@ -15,26 +14,19 @@ const STATIC_ASSETS = [
   '/favicon.png'
 ]
 
-// Install event: pre-cache all routes safely
+// Install event: cache basic app shell
 self.addEventListener('install', (event) => {
   self.skipWaiting()
   event.waitUntil(
-    caches.open(CACHE_NAME).then(async (cache) => {
-      for (const asset of STATIC_ASSETS) {
-        try {
-          const response = await fetch(asset, { credentials: 'same-origin' })
-          if (response && response.status === 200 && !response.redirected) {
-            await cache.put(asset, response)
-          }
-        } catch (err) {
-          // ignore individual pre-cache failures
-        }
-      }
+    caches.open(CACHE_NAME).then((cache) => {
+      return cache.addAll(STATIC_ASSETS).catch((err) => {
+        console.warn('Failed to pre-cache some initial assets:', err)
+      })
     })
   )
 })
 
-// Activate event: claim clients and clean old caches
+// Activate event: clean up old caches and claim clients
 self.addEventListener('activate', (event) => {
   event.waitUntil(
     Promise.all([
@@ -48,48 +40,80 @@ self.addEventListener('activate', (event) => {
   )
 })
 
-// Fetch event: Cache First for instant offline page switching (Stale-While-Revalidate)
+// Fetch event: Network-First with Cache Fallback for HTML navigation, Cache-First for static assets
 self.addEventListener('fetch', (event) => {
   const { request } = event
   const url = new URL(request.url)
 
+  // Skip non-GET requests or external origins (e.g. Supabase API calls)
   if (request.method !== 'GET' || url.origin !== self.location.origin) {
     return
   }
 
-  // Handle all GET requests (HTML navigation, RSC payloads, static JS/CSS assets)
-  event.respondWith(
-    (async () => {
-      const cache = await caches.open(CACHE_NAME)
-      const cachedResponse = await cache.match(request)
-
-      // 1. If we have a valid cached response, serve it immediately!
-      if (cachedResponse && !cachedResponse.redirected) {
-        // Asynchronously update cache in background if online
-        fetch(request).then((networkResponse) => {
-          if (networkResponse && networkResponse.status === 200 && !networkResponse.redirected) {
-            cache.put(request, networkResponse)
+  // Navigation / HTML requests
+  if (request.mode === 'navigate' || request.headers.get('accept')?.includes('text/html')) {
+    event.respondWith(
+      (async () => {
+        const cachedResponse = await caches.match(request)
+        const fetchPromise = fetch(request).then((response) => {
+          if (response && response.status === 200) {
+            const copy = response.clone()
+            caches.open(CACHE_NAME).then((cache) => cache.put(request, copy))
           }
-        }).catch(() => {})
-        return cachedResponse
-      }
+          return response
+        }).catch(async () => {
+          if (cachedResponse) return cachedResponse
+          const rootFallback = await caches.match('/')
+          if (rootFallback) return rootFallback
+          return new Response(
+            `<!DOCTYPE html><html><head><meta charset="utf-8"/><title>FluxoAÊ Offline</title></head><body><h1>FluxoAÊ Offline</h1><p>Modo offline ativado.</p></body></html>`,
+            { headers: { 'Content-Type': 'text/html' } }
+          )
+        })
 
-      // 2. If not in cache, try network
-      try {
-        const networkResponse = await fetch(request)
-        if (networkResponse && networkResponse.status === 200 && !networkResponse.redirected) {
-          cache.put(request, networkResponse.clone())
-        }
-        return networkResponse
-      } catch (err) {
-        // 3. Offline fallbacks if network fails and no exact cache match
+        return cachedResponse || fetchPromise
+      })()
+    )
+    return
+  }
+
+  // Next.js RSC (React Server Components) Payloads for Client Navigation
+  if (request.headers.get('RSC') === '1' || url.searchParams.has('_rsc')) {
+    event.respondWith(
+      (async () => {
+        const cachedResponse = await caches.match(request)
+        const fetchPromise = fetch(request).then((response) => {
+          if (response && response.status === 200) {
+            const copy = response.clone()
+            caches.open(CACHE_NAME).then((cache) => cache.put(request, copy))
+          }
+          return response
+        }).catch(async () => {
+          if (cachedResponse) return cachedResponse
+          return Response.error()
+        })
+        
+        return cachedResponse || fetchPromise
+      })()
+    )
+    return
+  }
+
+  // Static Next.js assets (_next/static, fonts, icons) -> Cache First
+  if (url.pathname.startsWith('/_next/') || url.pathname.match(/\.(png|jpg|jpeg|svg|gif|ico|css|js)$/)) {
+    event.respondWith(
+      caches.match(request).then((cachedResponse) => {
         if (cachedResponse) return cachedResponse
 
-        const rootFallback = await cache.match('/')
-        if (rootFallback && !rootFallback.redirected) return rootFallback
-
-        return new Response('', { status: 200 })
-      }
-    })()
-  )
+        return fetch(request).then((response) => {
+          if (response && response.status === 200) {
+            const copy = response.clone()
+            caches.open(CACHE_NAME).then((cache) => cache.put(request, copy))
+          }
+          return response
+        })
+      })
+    )
+    return
+  }
 })
