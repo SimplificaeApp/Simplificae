@@ -303,12 +303,41 @@ export function TransactionForm({
     if (!initialData) return
     setIsDeleting(true)
     startTransition(async () => {
-      const res = await deleteTransaction(initialData.id, scope)
-      setIsDeleting(false)
-      if (res?.error) toast.error(res.error)
-      else {
-        toast.success(scope === 'future' ? 'Lançamento e próximos excluídos!' : 'Lançamento excluído!')
-        invalidateData()
+      if (typeof navigator !== 'undefined' && !navigator.onLine) {
+        await enqueueMutation({
+          actionType: 'DELETE_TRANSACTION',
+          payload: { id: initialData.id, scope }
+        })
+        queryClient.setQueryData(QUERY_KEYS.transactions, (old: any) => {
+          if (!old) return old
+          return old.filter((t: any) => t.id !== initialData.id)
+        })
+        toast.info('Você está offline. Exclusão salva localmente e será sincronizada depois.')
+        setIsDeleting(false)
+        if (onSuccess) onSuccess()
+        return
+      }
+
+      try {
+        const res = await deleteTransaction(initialData.id, scope)
+        setIsDeleting(false)
+        if (res?.error) toast.error(res.error)
+        else {
+          toast.success(scope === 'future' ? 'Lançamento e próximos excluídos!' : 'Lançamento excluído!')
+          invalidateData()
+          if (onSuccess) onSuccess()
+        }
+      } catch (err) {
+        await enqueueMutation({
+          actionType: 'DELETE_TRANSACTION',
+          payload: { id: initialData.id, scope }
+        })
+        queryClient.setQueryData(QUERY_KEYS.transactions, (old: any) => {
+          if (!old) return old
+          return old.filter((t: any) => t.id !== initialData.id)
+        })
+        toast.info('Falha na conexão. Exclusão salva localmente.')
+        setIsDeleting(false)
         if (onSuccess) onSuccess()
       }
     })

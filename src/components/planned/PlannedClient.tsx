@@ -35,7 +35,9 @@ import { payTransactionNew, unpayTransaction, deleteTransaction } from '@/app/ac
 import { updateWorkspaceTurnoverDay } from '@/app/actions/settings'
 import { getCreditCardDueDate } from '@/lib/creditCardUtils'
 import { toast } from 'sonner'
-import { useTransactionsQuery, useCategoriesQuery, useAccountsQuery, useInvalidateFinancialData } from '@/hooks/useFinancialData'
+import { useTransactionsQuery, useCategoriesQuery, useAccountsQuery, useInvalidateFinancialData, QUERY_KEYS } from '@/hooks/useFinancialData'
+import { useQueryClient } from '@tanstack/react-query'
+import { enqueueMutation } from '@/lib/offlineSync'
 
 // Dynamic load for ECharts
 const ReactECharts = dynamic(() => import('echarts-for-react'), {
@@ -101,6 +103,7 @@ export function PlannedClient({
   const [pendingFilter, setPendingFilter] = useState<'all' | 'expense' | 'income'>('all')
 
   const invalidateData = useInvalidateFinancialData()
+  const queryClient = useQueryClient()
 
   // Modals & Popovers
   const [isTxModalOpen, setIsTxModalOpen] = useState(false)
@@ -848,54 +851,103 @@ export function PlannedClient({
   const handleSaveTurnoverDay = () => {
     if (!workspace?.id) return
     startTransition(async () => {
-      const res = await updateWorkspaceTurnoverDay(workspace.id, Number(tempTurnoverDay))
-      if (res?.error) toast.error(res.error)
-      else {
-        toast.success(res.success)
-        invalidateData()
+      if (typeof navigator !== 'undefined' && !navigator.onLine) {
+        await enqueueMutation({
+          actionType: 'UPDATE_TURNOVER_DAY',
+          payload: { workspaceId: workspace.id, day: Number(tempTurnoverDay) }
+        })
+        toast.info('Você está offline. Preferência salva localmente.')
+        setIsTurnoverModalOpen(false)
+        return
+      }
+
+      try {
+        const res = await updateWorkspaceTurnoverDay(workspace.id, Number(tempTurnoverDay))
+        if (res?.error) toast.error(res.error)
+        else {
+          toast.success(res.success)
+          invalidateData()
+          setIsTurnoverModalOpen(false)
+        }
+      } catch (err) {
+        await enqueueMutation({
+          actionType: 'UPDATE_TURNOVER_DAY',
+          payload: { workspaceId: workspace.id, day: Number(tempTurnoverDay) }
+        })
+        toast.info('Falha na conexão. Preferência salva localmente.')
         setIsTurnoverModalOpen(false)
       }
     })
   }
 
   const handlePay = (id: string) => {
-    // ⚡ Optimistic update: Immediate UI response in 0ms
     setLocalTransactions(prev => prev.map(t => t.id === id ? { ...t, status: 'paid_planned' } : t))
+    queryClient.setQueryData(QUERY_KEYS.transactions, (old: any) => {
+      if (!old) return old
+      return old.map((t: any) => t.id === id ? { ...t, status: 'paid_planned' } : t)
+    })
 
     startTransition(async () => {
+      if (typeof navigator !== 'undefined' && !navigator.onLine) {
+        await enqueueMutation({
+          actionType: 'MARK_PAID',
+          payload: { id }
+        })
+        toast.info('Você está offline. Pagamento marcado localmente.')
+        return
+      }
+
       try {
         const res = await payTransactionNew(id)
         if (res?.error) {
           toast.error(res.error)
-          setLocalTransactions(transactions) // Revert on failure
+          setLocalTransactions(transactions)
         } else {
           toast.success(res.success)
           invalidateData()
         }
       } catch (err) {
-        toast.error("Erro ao processar pagamento.")
-        setLocalTransactions(transactions)
+        await enqueueMutation({
+          actionType: 'MARK_PAID',
+          payload: { id }
+        })
+        toast.info('Falha na conexão. Pagamento salvo offline.')
       }
     })
   }
 
   const handleUnpay = (id: string) => {
-    // ⚡ Optimistic update: Immediate UI response in 0ms
-    setLocalTransactions(prev => prev.map(t => t.id === id ? { ...t, status: 'planned' } : t))
+    setLocalTransactions(prev => prev.map(t => t.id === id ? { ...t, status: 'pending' } : t))
+    queryClient.setQueryData(QUERY_KEYS.transactions, (old: any) => {
+      if (!old) return old
+      return old.map((t: any) => t.id === id ? { ...t, status: 'pending' } : t)
+    })
 
     startTransition(async () => {
+      if (typeof navigator !== 'undefined' && !navigator.onLine) {
+        await enqueueMutation({
+          actionType: 'UNPAY_TRANSACTION',
+          payload: { id }
+        })
+        toast.info('Você está offline. Alteração salva localmente.')
+        return
+      }
+
       try {
         const res = await unpayTransaction(id)
         if (res?.error) {
           toast.error(res.error)
-          setLocalTransactions(transactions) // Revert on failure
+          setLocalTransactions(transactions)
         } else {
           toast.success(res.success)
           invalidateData()
         }
       } catch (err) {
-        toast.error("Erro ao desmarcar pagamento.")
-        setLocalTransactions(transactions)
+        await enqueueMutation({
+          actionType: 'UNPAY_TRANSACTION',
+          payload: { id }
+        })
+        toast.info('Falha na conexão. Alteração salva offline.')
       }
     })
   }
@@ -906,11 +958,38 @@ export function PlannedClient({
         label: 'Sim, excluir',
         onClick: () => {
           startTransition(async () => {
-            const res = await deleteTransaction(id)
-            if (res?.error) toast.error(res.error)
-            else {
-              toast.success(res.success)
-              invalidateData()
+            if (typeof navigator !== 'undefined' && !navigator.onLine) {
+              await enqueueMutation({
+                actionType: 'DELETE_TRANSACTION',
+                payload: { id }
+              })
+              setLocalTransactions(prev => prev.filter(t => t.id !== id))
+              queryClient.setQueryData(QUERY_KEYS.transactions, (old: any) => {
+                if (!old) return old
+                return old.filter((t: any) => t.id !== id)
+              })
+              toast.info('Você está offline. Lançamento excluído localmente e será sincronizado depois.')
+              return
+            }
+
+            try {
+              const res = await deleteTransaction(id)
+              if (res?.error) toast.error(res.error)
+              else {
+                toast.success(res.success)
+                invalidateData()
+              }
+            } catch (err) {
+              await enqueueMutation({
+                actionType: 'DELETE_TRANSACTION',
+                payload: { id }
+              })
+              setLocalTransactions(prev => prev.filter(t => t.id !== id))
+              queryClient.setQueryData(QUERY_KEYS.transactions, (old: any) => {
+                if (!old) return old
+                return old.filter((t: any) => t.id !== id)
+              })
+              toast.info('Falha na conexão. Lançamento excluído localmente.')
             }
           })
         }

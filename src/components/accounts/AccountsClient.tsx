@@ -12,7 +12,9 @@ import { deleteAccount, editAccountBalance, toggleAccountHidden } from '@/app/ac
 import { deleteVault, editVaultBalance, toggleVaultHidden } from '@/app/actions/vaults'
 import { toast } from 'sonner'
 import { usePrivacy } from '@/components/providers/PrivacyProvider'
-import { useAccountsQuery, useInvalidateFinancialData } from '@/hooks/useFinancialData'
+import { useAccountsQuery, useInvalidateFinancialData, QUERY_KEYS } from '@/hooks/useFinancialData'
+import { useQueryClient } from '@tanstack/react-query'
+import { enqueueMutation } from '@/lib/offlineSync'
 
 type Vault = { id: string; name: string; target_amount: number | null; balance: number; icon?: string; color?: string; account_id: string }
 type Account = { id: string; name: string; type: string; initial_balance: number; icon?: string; color?: string; account_vaults?: Vault[] }
@@ -28,6 +30,7 @@ export function AccountsClient({
 }) {
   const { data: cachedAccounts } = useAccountsQuery(initialAccounts)
   const invalidateData = useInvalidateFinancialData()
+  const queryClient = useQueryClient()
   const accounts = (cachedAccounts || initialAccounts).filter(a => a.type !== 'credit_card')
   const [isAccountModalOpen, setIsAccountModalOpen] = useState(false)
   const [isVaultModalOpen, setIsVaultModalOpen] = useState(false)
@@ -67,11 +70,36 @@ export function AccountsClient({
         label: 'Sim, excluir',
         onClick: () => {
           startTransition(async () => {
-            const res = await deleteAccount(id)
-            if (res?.error) toast.error(res.error)
-            else {
-              toast.success(res.success)
-              invalidateData()
+            if (typeof navigator !== 'undefined' && !navigator.onLine) {
+              await enqueueMutation({
+                actionType: 'DELETE_ACCOUNT',
+                payload: { id }
+              })
+              queryClient.setQueryData(QUERY_KEYS.accounts, (old: any) => {
+                if (!old) return old
+                return old.filter((a: any) => a.id !== id)
+              })
+              toast.info('Você está offline. Conta excluída localmente e será sincronizada depois.')
+              return
+            }
+
+            try {
+              const res = await deleteAccount(id)
+              if (res?.error) toast.error(res.error)
+              else {
+                toast.success(res.success)
+                invalidateData()
+              }
+            } catch (err) {
+              await enqueueMutation({
+                actionType: 'DELETE_ACCOUNT',
+                payload: { id }
+              })
+              queryClient.setQueryData(QUERY_KEYS.accounts, (old: any) => {
+                if (!old) return old
+                return old.filter((a: any) => a.id !== id)
+              })
+              toast.info('Falha na conexão. Conta excluída localmente.')
             }
           })
         }
@@ -87,11 +115,42 @@ export function AccountsClient({
         label: 'Sim, excluir',
         onClick: () => {
           startTransition(async () => {
-            const res = await deleteVault(id)
-            if (res?.error) toast.error(res.error)
-            else {
-              toast.success(res.success)
-              invalidateData()
+            if (typeof navigator !== 'undefined' && !navigator.onLine) {
+              await enqueueMutation({
+                actionType: 'DELETE_VAULT',
+                payload: { id }
+              })
+              queryClient.setQueryData(QUERY_KEYS.accounts, (old: any) => {
+                if (!old) return old
+                return old.map((a: any) => ({
+                  ...a,
+                  account_vaults: (a.account_vaults || []).filter((v: any) => v.id !== id)
+                }))
+              })
+              toast.info('Você está offline. Cofrinho excluído localmente e será sincronizado depois.')
+              return
+            }
+
+            try {
+              const res = await deleteVault(id)
+              if (res?.error) toast.error(res.error)
+              else {
+                toast.success(res.success)
+                invalidateData()
+              }
+            } catch (err) {
+              await enqueueMutation({
+                actionType: 'DELETE_VAULT',
+                payload: { id }
+              })
+              queryClient.setQueryData(QUERY_KEYS.accounts, (old: any) => {
+                if (!old) return old
+                return old.map((a: any) => ({
+                  ...a,
+                  account_vaults: (a.account_vaults || []).filter((v: any) => v.id !== id)
+                }))
+              })
+              toast.info('Falha na conexão. Cofrinho excluído localmente.')
             }
           })
         }
@@ -101,44 +160,130 @@ export function AccountsClient({
   }
 
   const handleEditAccountBalance = async (formData: FormData) => {
-    const res = await editAccountBalance(null, formData)
-    if (res?.error) toast.error(res.error)
-    else {
-      toast.success(res.success)
-      invalidateData()
+    const payload = Object.fromEntries(formData.entries())
+    const newBal = payload.initial_balance ? Number(payload.initial_balance.toString().replace('.', '').replace(',', '.')) : 0
+
+    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+      await enqueueMutation({
+        actionType: 'EDIT_ACCOUNT_BALANCE',
+        payload
+      })
+      queryClient.setQueryData(QUERY_KEYS.accounts, (old: any) => {
+        if (!old) return old
+        return old.map((a: any) => a.id === payload.id ? { ...a, initial_balance: newBal } : a)
+      })
+      toast.info('Você está offline. Saldo ajustado localmente e será sincronizado depois.')
+      setIsEditAccModalOpen(false)
+      return
+    }
+
+    try {
+      const res = await editAccountBalance(null, formData)
+      if (res?.error) toast.error(res.error)
+      else {
+        toast.success(res.success)
+        invalidateData()
+        setIsEditAccModalOpen(false)
+      }
+    } catch (err) {
+      await enqueueMutation({
+        actionType: 'EDIT_ACCOUNT_BALANCE',
+        payload
+      })
+      queryClient.setQueryData(QUERY_KEYS.accounts, (old: any) => {
+        if (!old) return old
+        return old.map((a: any) => a.id === payload.id ? { ...a, initial_balance: newBal } : a)
+      })
+      toast.info('Falha na conexão. Saldo ajustado localmente.')
       setIsEditAccModalOpen(false)
     }
   }
 
   const handleToggleAccountHidden = (id: string, current: boolean) => {
-    if (current) {
-      requestUnlock(() => {
-        startTransition(async () => {
+    const doToggle = () => {
+      startTransition(async () => {
+        if (typeof navigator !== 'undefined' && !navigator.onLine) {
+          await enqueueMutation({
+            actionType: 'TOGGLE_ACCOUNT_HIDDEN',
+            payload: { id, is_hidden: !current }
+          })
+          queryClient.setQueryData(QUERY_KEYS.accounts, (old: any) => {
+            if (!old) return old
+            return old.map((a: any) => a.id === id ? { ...a, is_hidden: !current } : a)
+          })
+          toast.info('Você está offline. Visibilidade alterada localmente.')
+          return
+        }
+
+        try {
           const res = await toggleAccountHidden(id, !current)
           if (res?.error) toast.error(res.error)
-        })
+          else invalidateData()
+        } catch (err) {
+          await enqueueMutation({
+            actionType: 'TOGGLE_ACCOUNT_HIDDEN',
+            payload: { id, is_hidden: !current }
+          })
+          queryClient.setQueryData(QUERY_KEYS.accounts, (old: any) => {
+            if (!old) return old
+            return old.map((a: any) => a.id === id ? { ...a, is_hidden: !current } : a)
+          })
+          toast.info('Falha na conexão. Visibilidade alterada localmente.')
+        }
       })
+    }
+
+    if (current) {
+      requestUnlock(doToggle)
     } else {
-      startTransition(async () => {
-        const res = await toggleAccountHidden(id, !current)
-        if (res?.error) toast.error(res.error)
-      })
+      doToggle()
     }
   }
 
   const handleToggleVaultHidden = (id: string, current: boolean) => {
-    if (current) {
-      requestUnlock(() => {
-        startTransition(async () => {
+    const doToggle = () => {
+      startTransition(async () => {
+        if (typeof navigator !== 'undefined' && !navigator.onLine) {
+          await enqueueMutation({
+            actionType: 'TOGGLE_VAULT_HIDDEN',
+            payload: { id, is_hidden: !current }
+          })
+          queryClient.setQueryData(QUERY_KEYS.accounts, (old: any) => {
+            if (!old) return old
+            return old.map((a: any) => ({
+              ...a,
+              account_vaults: (a.account_vaults || []).map((v: any) => v.id === id ? { ...v, is_hidden: !current } : v)
+            }))
+          })
+          toast.info('Você está offline. Visibilidade do cofrinho alterada localmente.')
+          return
+        }
+
+        try {
           const res = await toggleVaultHidden(id, !current)
           if (res?.error) toast.error(res.error)
-        })
+          else invalidateData()
+        } catch (err) {
+          await enqueueMutation({
+            actionType: 'TOGGLE_VAULT_HIDDEN',
+            payload: { id, is_hidden: !current }
+          })
+          queryClient.setQueryData(QUERY_KEYS.accounts, (old: any) => {
+            if (!old) return old
+            return old.map((a: any) => ({
+              ...a,
+              account_vaults: (a.account_vaults || []).map((v: any) => v.id === id ? { ...v, is_hidden: !current } : v)
+            }))
+          })
+          toast.info('Falha na conexão. Visibilidade do cofrinho alterada localmente.')
+        }
       })
+    }
+
+    if (current) {
+      requestUnlock(doToggle)
     } else {
-      startTransition(async () => {
-        const res = await toggleVaultHidden(id, !current)
-        if (res?.error) toast.error(res.error)
-      })
+      doToggle()
     }
   }
 

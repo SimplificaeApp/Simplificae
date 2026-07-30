@@ -1,9 +1,14 @@
 'use client'
 
-import { useActionState, useEffect, useState } from 'react'
+import { useState } from 'react'
 import { transferToVault } from '@/app/actions/vaults'
 import { ArrowDownCircle, ArrowUpCircle, Check, Loader2, Sparkles } from 'lucide-react'
 import { motion } from 'framer-motion'
+import { toast } from 'sonner'
+import { useRouter } from 'next/navigation'
+import { enqueueMutation } from '@/lib/offlineSync'
+import { useInvalidateFinancialData, QUERY_KEYS } from '@/hooks/useFinancialData'
+import { useQueryClient } from '@tanstack/react-query'
 
 interface VaultActionFormProps {
   vaultId: string
@@ -12,20 +17,74 @@ interface VaultActionFormProps {
   onSuccess?: () => void
 }
 
-type State = { error?: string; success?: string }
-const initialState: State = {}
-
 export function VaultActionForm({ vaultId, actionType, categories = [], onSuccess }: VaultActionFormProps) {
-  const [state, formAction, pending] = useActionState(transferToVault, initialState)
+  const [isPendingLocal, setIsPendingLocal] = useState(false)
+  const pending = isPendingLocal
+  const [localError, setLocalError] = useState<string | null>(null)
   const [amount, setAmount] = useState('')
   const [createTransaction, setCreateTransaction] = useState(false)
   const [selectedCategoryId, setSelectedCategoryId] = useState('')
 
-  useEffect(() => {
-    if (state.success && onSuccess) {
-      onSuccess()
+  const router = useRouter()
+  const invalidateData = useInvalidateFinancialData()
+  const queryClient = useQueryClient()
+
+  const customAction = async (formData: FormData) => {
+    setIsPendingLocal(true)
+    setLocalError(null)
+    const payload = Object.fromEntries(formData.entries())
+    const parsedAmount = payload.amount ? Number(payload.amount.toString().replace('.', '').replace(',', '.')) : 0
+
+    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+       await enqueueMutation({
+          actionType: 'TRANSFER_TO_VAULT',
+          payload
+       })
+       toast.info(`Você está offline. ${actionType === 'deposit' ? 'Aporte' : 'Resgate'} salvo localmente e será sincronizado depois.`)
+       
+       queryClient.setQueryData(QUERY_KEYS.accounts, (old: any) => {
+         if (!old) return old
+         return old.map((a: any) => {
+           const vaults = a.account_vaults || []
+           const hasVault = vaults.some((v: any) => v.id === vaultId)
+           if (!hasVault) return a
+
+           const diff = actionType === 'deposit' ? parsedAmount : -parsedAmount
+           const updatedVaults = vaults.map((v: any) => v.id === vaultId ? { ...v, balance: Math.max(0, (v.balance || 0) + diff) } : v)
+           const updatedAccBalance = Math.max(0, (a.initial_balance || 0) - diff)
+           return { ...a, initial_balance: updatedAccBalance, account_vaults: updatedVaults }
+         })
+       })
+       
+       if (onSuccess) onSuccess()
+       setIsPendingLocal(false)
+       return
     }
-  }, [state.success, onSuccess])
+
+    try {
+      const res = await transferToVault(null, formData)
+      if (res?.error) {
+         setLocalError(res.error)
+      } else {
+         invalidateData()
+         router.refresh()
+         if (onSuccess) onSuccess()
+      }
+    } catch (err: any) {
+      if (err.message && (err.message.includes('fetch') || err.message.includes('Network'))) {
+        await enqueueMutation({
+           actionType: 'TRANSFER_TO_VAULT',
+           payload
+        })
+        toast.info('Falha na conexão. Transferência salva offline.')
+        invalidateData()
+        if (onSuccess) onSuccess()
+      } else {
+        setLocalError('Erro ao processar transferência.')
+      }
+    }
+    setIsPendingLocal(false)
+  }
 
   const handleAmountChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     let value = e.target.value.replace(/\D/g, '')
@@ -40,13 +99,13 @@ export function VaultActionForm({ vaultId, actionType, categories = [], onSucces
   const investmentCategories = categories.filter((c: any) => c.is_investment)
 
   return (
-    <form action={formAction} className="flex flex-col gap-5">
+    <form action={customAction} className="flex flex-col gap-5">
       <input type="hidden" name="vault_id" value={vaultId} />
       <input type="hidden" name="action" value={actionType} />
       
-      {state.error && (
+      {localError && (
         <div className="p-3 text-sm text-rose-600 bg-rose-50 border border-rose-200 rounded-xl font-medium">
-          {state.error}
+          {localError}
         </div>
       )}
 

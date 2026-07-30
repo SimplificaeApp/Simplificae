@@ -1,9 +1,14 @@
 'use client'
 
-import { useActionState, useEffect, useState } from 'react'
+import { useState } from 'react'
 import { createTransaction } from '@/app/actions/transactions'
 import { Loader2 } from 'lucide-react'
 import { motion } from 'framer-motion'
+import { toast } from 'sonner'
+import { useRouter } from 'next/navigation'
+import { enqueueMutation } from '@/lib/offlineSync'
+import { useInvalidateFinancialData, QUERY_KEYS } from '@/hooks/useFinancialData'
+import { useQueryClient } from '@tanstack/react-query'
 
 interface PayInvoiceFormProps {
   workspaceId: string
@@ -12,18 +17,15 @@ interface PayInvoiceFormProps {
   onSuccess?: () => void
 }
 
-type State = { error?: string; success?: string }
-const initialState: State = {}
-
 export function PayInvoiceForm({ workspaceId, card, accounts, onSuccess }: PayInvoiceFormProps) {
-  const [state, formAction, pending] = useActionState(createTransaction, initialState)
+  const [isPendingLocal, setIsPendingLocal] = useState(false)
+  const pending = isPendingLocal
+  const [localError, setLocalError] = useState<string | null>(null)
   const [amount, setAmount] = useState('')
 
-  useEffect(() => {
-    if (state.success && onSuccess) {
-      onSuccess()
-    }
-  }, [state.success, onSuccess])
+  const router = useRouter()
+  const invalidateData = useInvalidateFinancialData()
+  const queryClient = useQueryClient()
 
   const handleAmountChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     let value = e.target.value.replace(/\D/g, '')
@@ -34,16 +36,75 @@ export function PayInvoiceForm({ workspaceId, card, accounts, onSuccess }: PayIn
     setAmount(value)
   }
 
+  const customAction = async (formData: FormData) => {
+    setIsPendingLocal(true)
+    setLocalError(null)
+    const payload = Object.fromEntries(formData.entries())
+    
+    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+       const newMutation = await enqueueMutation({
+          actionType: 'CREATE_TRANSACTION',
+          payload
+       })
+       toast.info('Você está offline. Pagamento da fatura salvo localmente e será sincronizado depois.')
+       
+       const parsedAmt = payload.amount ? Number(payload.amount.toString().replace('.', '').replace(',', '.')) : 0
+       queryClient.setQueryData(QUERY_KEYS.transactions, (old: any) => {
+         if (!old) return old
+         const fakeTx = {
+           id: newMutation.id,
+           workspace_id: workspaceId,
+           description: payload.description,
+           amount: parsedAmt,
+           type: 'transfer',
+           status: 'paid_planned',
+           date: payload.date || new Date().toISOString().split('T')[0],
+           account_id: payload.account_id,
+           destination_account_id: payload.destination_account_id
+         }
+         return [fakeTx, ...old]
+       })
+       
+       if (onSuccess) onSuccess()
+       setIsPendingLocal(false)
+       return
+    }
+
+    try {
+      const res = await createTransaction(null, formData)
+      if (res?.error) {
+         setLocalError(res.error)
+      } else {
+         invalidateData()
+         router.refresh()
+         if (onSuccess) onSuccess()
+      }
+    } catch (err: any) {
+      if (err.message && (err.message.includes('fetch') || err.message.includes('Network'))) {
+        await enqueueMutation({
+           actionType: 'CREATE_TRANSACTION',
+           payload
+        })
+        toast.info('Falha na conexão. Pagamento salvo offline.')
+        invalidateData()
+        if (onSuccess) onSuccess()
+      } else {
+        setLocalError('Erro ao registrar pagamento.')
+      }
+    }
+    setIsPendingLocal(false)
+  }
+
   return (
-    <form action={formAction} className="flex flex-col gap-5">
+    <form action={customAction} className="flex flex-col gap-5">
       <input type="hidden" name="workspace_id" value={workspaceId} />
       <input type="hidden" name="type" value="transfer" />
       <input type="hidden" name="destination_account_id" value={card?.id} />
       <input type="hidden" name="description" value={`Pagamento Fatura ${card?.name}`} />
       
-      {state.error && (
+      {localError && (
         <div className="p-3 text-sm text-rose-600 bg-rose-50 border border-rose-200 rounded-xl font-medium">
-          {state.error}
+          {localError}
         </div>
       )}
 
