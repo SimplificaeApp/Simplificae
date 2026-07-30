@@ -9,7 +9,9 @@ import { motion } from 'framer-motion'
 import { deleteCategory } from '@/app/actions/categories'
 import { updatePrivacyPin, updateWorkspaceTurnoverDay } from '@/app/actions/settings'
 import { toast } from 'sonner'
-import { useCategoriesQuery, useInvalidateFinancialData } from '@/hooks/useFinancialData'
+import { useCategoriesQuery, useInvalidateFinancialData, QUERY_KEYS } from '@/hooks/useFinancialData'
+import { useQueryClient } from '@tanstack/react-query'
+import { enqueueMutation } from '@/lib/offlineSync'
 
 type Category = { 
   id: string
@@ -38,6 +40,7 @@ export function SettingsClient({
   const { data: cachedCategories } = useCategoriesQuery(initialCategories)
   const categories = cachedCategories || initialCategories
   const invalidateData = useInvalidateFinancialData()
+  const queryClient = useQueryClient()
   const [activeTab, setActiveTab] = useState<'categories' | 'preferences' | 'privacy'>('categories')
   const [isModalOpen, setIsModalOpen] = useState(false)
   const [editingCategory, setEditingCategory] = useState<Category | null>(null)
@@ -64,11 +67,28 @@ export function SettingsClient({
   const handleSaveTurnoverDay = () => {
     if (!workspaceId) return
     startTransition(async () => {
-      const res = await updateWorkspaceTurnoverDay(workspaceId, Number(turnoverDay))
-      if (res?.error) toast.error(res.error)
-      else {
-        toast.success(res.success)
-        invalidateData()
+      if (typeof navigator !== 'undefined' && !navigator.onLine) {
+        await enqueueMutation({
+          actionType: 'UPDATE_TURNOVER_DAY',
+          payload: { workspaceId, day: Number(turnoverDay) }
+        })
+        toast.info('Você está offline. Preferência salva localmente e será sincronizada depois.')
+        return
+      }
+
+      try {
+        const res = await updateWorkspaceTurnoverDay(workspaceId, Number(turnoverDay))
+        if (res?.error) toast.error(res.error)
+        else {
+          toast.success(res.success)
+          invalidateData()
+        }
+      } catch (err) {
+        await enqueueMutation({
+          actionType: 'UPDATE_TURNOVER_DAY',
+          payload: { workspaceId, day: Number(turnoverDay) }
+        })
+        toast.info('Falha na conexão. Preferência salva localmente.')
       }
     })
   }
@@ -307,11 +327,27 @@ export function SettingsClient({
         {activeTab === 'privacy' && (
           <form 
             action={async (formData) => {
-              const res = await updatePrivacyPin(null, formData)
-              if (res?.error) toast.error(res.error)
-              else {
-                toast.success(res.success)
-                invalidateData()
+              if (typeof navigator !== 'undefined' && !navigator.onLine) {
+                await enqueueMutation({
+                  actionType: 'UPDATE_PIN',
+                  payload: Object.fromEntries(formData.entries())
+                })
+                toast.info('Você está offline. PIN salvo localmente e será sincronizado depois.')
+                return
+              }
+              try {
+                const res = await updatePrivacyPin(null, formData)
+                if (res?.error) toast.error(res.error)
+                else {
+                  toast.success(res.success)
+                  invalidateData()
+                }
+              } catch (err) {
+                await enqueueMutation({
+                  actionType: 'UPDATE_PIN',
+                  payload: Object.fromEntries(formData.entries())
+                })
+                toast.info('Falha na conexão. PIN salvo localmente.')
               }
             }}
             className="flex flex-col gap-4 max-w-xl"
@@ -400,11 +436,36 @@ export function SettingsClient({
                   const targetId = deletingCategory.id
                   setDeletingCategory(null)
                   startTransition(async () => {
-                    const res = await deleteCategory(targetId)
-                    if (res?.error) toast.error(res.error)
-                    else {
-                      toast.success(res.success)
-                      invalidateData()
+                    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+                      await enqueueMutation({
+                        actionType: 'DELETE_CATEGORY',
+                        payload: { id: targetId }
+                      })
+                      queryClient.setQueryData(QUERY_KEYS.categories, (old: any) => {
+                        if (!old) return old
+                        return old.filter((c: any) => c.id !== targetId)
+                      })
+                      toast.info('Você está offline. Categoria excluída localmente e será sincronizada depois.')
+                      return
+                    }
+
+                    try {
+                      const res = await deleteCategory(targetId)
+                      if (res?.error) toast.error(res.error)
+                      else {
+                        toast.success(res.success)
+                        invalidateData()
+                      }
+                    } catch (err) {
+                      await enqueueMutation({
+                        actionType: 'DELETE_CATEGORY',
+                        payload: { id: targetId }
+                      })
+                      queryClient.setQueryData(QUERY_KEYS.categories, (old: any) => {
+                        if (!old) return old
+                        return old.filter((c: any) => c.id !== targetId)
+                      })
+                      toast.info('Falha na conexão. Categoria excluída localmente.')
                     }
                   })
                 }}

@@ -1,10 +1,15 @@
 'use client'
 
-import { useActionState, useEffect, useState } from 'react'
+import { useState } from 'react'
 import { createAccount, updateAccount } from '@/app/actions/accounts'
 import { ArrowRight, Loader2 } from 'lucide-react'
 import { motion } from 'framer-motion'
 import dynamic from 'next/dynamic'
+import { toast } from 'sonner'
+import { useRouter } from 'next/navigation'
+import { enqueueMutation } from '@/lib/offlineSync'
+import { useInvalidateFinancialData, QUERY_KEYS } from '@/hooks/useFinancialData'
+import { useQueryClient } from '@tanstack/react-query'
 
 const EmojiPicker = dynamic(
   () => import('emoji-picker-react').then(mod => mod.default),
@@ -22,12 +27,16 @@ interface AccountFormProps {
   onSuccess?: () => void
 }
 
-type State = { error?: string; success?: string }
-const initialState: State = {}
-
 export function AccountForm({ workspaceId, initialData, onSuccess }: AccountFormProps) {
-  const action = initialData ? updateAccount : createAccount
-  const [state, formAction, pending] = useActionState(action, initialState)
+  const isEditing = Boolean(initialData && initialData.id)
+  const actionToUse = isEditing ? updateAccount : createAccount
+  const [isPendingLocal, setIsPendingLocal] = useState(false)
+  const pending = isPendingLocal
+  const [localError, setLocalError] = useState<string | null>(null)
+
+  const router = useRouter()
+  const invalidateData = useInvalidateFinancialData()
+  const queryClient = useQueryClient()
   
   const [balance, setBalance] = useState(() => {
     if (initialData?.initial_balance) {
@@ -40,12 +49,6 @@ export function AccountForm({ workspaceId, initialData, onSuccess }: AccountForm
   const [selectedColor, setSelectedColor] = useState(initialData?.color || ACCOUNT_COLORS[0])
   const [accountType, setAccountType] = useState(initialData?.type || 'checking')
 
-  useEffect(() => {
-    if (state.success && onSuccess) {
-      onSuccess()
-    }
-  }, [state.success, onSuccess])
-
   const handleBalanceChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     let value = e.target.value.replace(/\D/g, '')
     if (value.length > 0) {
@@ -55,16 +58,88 @@ export function AccountForm({ workspaceId, initialData, onSuccess }: AccountForm
     setBalance(value)
   }
 
+  const customAction = async (formData: FormData) => {
+    setIsPendingLocal(true)
+    setLocalError(null)
+    const payload = Object.fromEntries(formData.entries())
+    
+    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+       const newMutation = await enqueueMutation({
+          actionType: isEditing ? 'UPDATE_ACCOUNT' : 'CREATE_ACCOUNT',
+          payload: { ...payload, id: initialData?.id }
+       })
+       toast.info('Você está offline. Conta salva localmente e será sincronizada depois.')
+       
+       queryClient.setQueryData(QUERY_KEYS.accounts, (old: any) => {
+         if (!old) return old
+         const parsedBal = payload.initial_balance ? Number(payload.initial_balance.toString().replace('.', '').replace(',', '.')) : 0
+         if (isEditing) {
+           return old.map((a: any) => a.id === initialData.id ? {
+             ...a,
+             name: payload.name,
+             type: payload.type,
+             icon: payload.icon,
+             color: payload.color,
+             initial_balance: parsedBal,
+             include_in_dashboard: payload.include_in_dashboard === 'true',
+             is_hidden: payload.is_hidden === 'true'
+           } : a)
+         } else {
+           const fakeAcc = {
+             id: newMutation.id,
+             name: payload.name,
+             type: payload.type,
+             icon: payload.icon,
+             color: payload.color,
+             initial_balance: parsedBal,
+             include_in_dashboard: payload.include_in_dashboard === 'true',
+             is_hidden: payload.is_hidden === 'true',
+             account_vaults: []
+           }
+           return [...old, fakeAcc]
+         }
+       })
+       
+       if (onSuccess) onSuccess()
+       setIsPendingLocal(false)
+       return
+    }
+
+    try {
+      const res = await actionToUse(null, formData)
+      if (res?.error) {
+         setLocalError(res.error)
+      } else {
+         invalidateData()
+         router.refresh()
+         if (onSuccess) onSuccess()
+      }
+    } catch (err: any) {
+      if (err.message && (err.message.includes('fetch') || err.message.includes('Network'))) {
+        await enqueueMutation({
+           actionType: isEditing ? 'UPDATE_ACCOUNT' : 'CREATE_ACCOUNT',
+           payload: { ...payload, id: initialData?.id }
+        })
+        toast.info('Falha na conexão. Conta salva offline e será sincronizada depois.')
+        invalidateData()
+        if (onSuccess) onSuccess()
+      } else {
+        setLocalError('Erro ao salvar conta.')
+      }
+    }
+    setIsPendingLocal(false)
+  }
+
   return (
-    <form action={formAction} className="flex flex-col gap-5">
+    <form action={customAction} className="flex flex-col gap-5">
       {initialData && <input type="hidden" name="id" value={initialData.id} />}
       <input type="hidden" name="workspace_id" value={workspaceId} />
       <input type="hidden" name="icon" value={selectedEmoji} />
       <input type="hidden" name="color" value={selectedColor} />
       
-      {state.error && (
+      {localError && (
         <div className="p-3 text-sm text-rose-600 bg-rose-50 border border-rose-200 rounded-xl font-medium">
-          {state.error}
+          {localError}
         </div>
       )}
 

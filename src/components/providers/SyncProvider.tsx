@@ -2,8 +2,11 @@
 
 import React, { createContext, useContext, useEffect, useState, useCallback } from 'react'
 import { getPendingMutations, removeMutation, OfflineMutation } from '@/lib/offlineSync'
-import { createTransaction, updateTransaction, deleteTransaction } from '@/app/actions/transactions'
+import { createTransaction, updateTransaction, deleteTransaction, payTransactionNew, unpayTransaction } from '@/app/actions/transactions'
 import { createCategory, updateCategory, deleteCategory } from '@/app/actions/categories'
+import { createAccount, updateAccount, deleteAccount, editAccountBalance, toggleAccountHidden } from '@/app/actions/accounts'
+import { createVault, updateVault, deleteVault, transferToVault, editVaultBalance, toggleVaultHidden } from '@/app/actions/vaults'
+import { updateWorkspaceTurnoverDay, updatePrivacyPin } from '@/app/actions/settings'
 import { CloudOff, RefreshCw, CheckCircle2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { useInvalidateFinancialData } from '@/hooks/useFinancialData'
@@ -76,6 +79,45 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
           case 'DELETE_TRANSACTION':
             res = await deleteTransaction(mutation.payload.id, mutation.payload.scope || 'single')
             break
+          case 'MARK_PAID':
+            res = await payTransactionNew(mutation.payload.id)
+            break
+          case 'UNPAY_TRANSACTION':
+            res = await unpayTransaction(mutation.payload.id)
+            break
+          case 'CREATE_ACCOUNT':
+            res = await createAccount({}, formData!)
+            break
+          case 'UPDATE_ACCOUNT':
+            res = await updateAccount({}, formData!)
+            break
+          case 'DELETE_ACCOUNT':
+            res = await deleteAccount(mutation.payload.id)
+            break
+          case 'EDIT_ACCOUNT_BALANCE':
+            res = await editAccountBalance({}, formData!)
+            break
+          case 'TOGGLE_ACCOUNT_HIDDEN':
+            res = await toggleAccountHidden(mutation.payload.id, Boolean(mutation.payload.is_hidden))
+            break
+          case 'CREATE_VAULT':
+            res = await createVault({}, formData!)
+            break
+          case 'UPDATE_VAULT':
+            res = await updateVault({}, formData!)
+            break
+          case 'DELETE_VAULT':
+            res = await deleteVault(mutation.payload.id)
+            break
+          case 'TRANSFER_TO_VAULT':
+            res = await transferToVault({}, formData!)
+            break
+          case 'EDIT_VAULT_BALANCE':
+            res = await editVaultBalance({}, formData!)
+            break
+          case 'TOGGLE_VAULT_HIDDEN':
+            res = await toggleVaultHidden(mutation.payload.id, Boolean(mutation.payload.is_hidden))
+            break
           case 'CREATE_CATEGORY':
             res = await createCategory({}, formData!)
             break
@@ -84,6 +126,12 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
             break
           case 'DELETE_CATEGORY':
             res = await deleteCategory(mutation.payload.id)
+            break
+          case 'UPDATE_TURNOVER_DAY':
+            res = await updateWorkspaceTurnoverDay(mutation.payload.workspaceId, Number(mutation.payload.day))
+            break
+          case 'UPDATE_PIN':
+            res = await updatePrivacyPin({}, formData!)
             break
         }
 

@@ -1,10 +1,15 @@
 'use client'
 
-import { useActionState, useEffect, useState } from 'react'
+import { useState } from 'react'
 import { createAccount, updateAccount } from '@/app/actions/accounts'
 import { Loader2 } from 'lucide-react'
 import { motion } from 'framer-motion'
 import dynamic from 'next/dynamic'
+import { toast } from 'sonner'
+import { useRouter } from 'next/navigation'
+import { enqueueMutation } from '@/lib/offlineSync'
+import { useInvalidateFinancialData, QUERY_KEYS } from '@/hooks/useFinancialData'
+import { useQueryClient } from '@tanstack/react-query'
 
 const EmojiPicker = dynamic(
   () => import('emoji-picker-react').then(mod => mod.default),
@@ -23,12 +28,16 @@ interface CreditCardFormProps {
   onSuccess?: () => void
 }
 
-type State = { error?: string; success?: string }
-const initialState: State = {}
-
 export function CreditCardForm({ workspaceId, initialData, onSuccess }: CreditCardFormProps) {
-  const action = initialData ? updateAccount : createAccount
-  const [state, formAction, pending] = useActionState(action, initialState)
+  const isEditing = Boolean(initialData && initialData.id)
+  const actionToUse = isEditing ? updateAccount : createAccount
+  const [isPendingLocal, setIsPendingLocal] = useState(false)
+  const pending = isPendingLocal
+  const [localError, setLocalError] = useState<string | null>(null)
+
+  const router = useRouter()
+  const invalidateData = useInvalidateFinancialData()
+  const queryClient = useQueryClient()
   
   const [showEmojiPicker, setShowEmojiPicker] = useState(false)
   const [selectedEmoji, setSelectedEmoji] = useState(initialData?.icon || '💳')
@@ -41,12 +50,6 @@ export function CreditCardForm({ workspaceId, initialData, onSuccess }: CreditCa
     return ''
   })
 
-  useEffect(() => {
-    if (state.success && onSuccess) {
-      onSuccess()
-    }
-  }, [state.success, onSuccess])
-
   const handleCreditLimitChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     let value = e.target.value.replace(/\D/g, '')
     if (value.length > 0) {
@@ -56,17 +59,92 @@ export function CreditCardForm({ workspaceId, initialData, onSuccess }: CreditCa
     setCreditLimit(value)
   }
 
+  const customAction = async (formData: FormData) => {
+    setIsPendingLocal(true)
+    setLocalError(null)
+    const payload = Object.fromEntries(formData.entries())
+    
+    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+       const newMutation = await enqueueMutation({
+          actionType: isEditing ? 'UPDATE_ACCOUNT' : 'CREATE_ACCOUNT',
+          payload: { ...payload, id: initialData?.id }
+       })
+       toast.info('Você está offline. Cartão de crédito salvo localmente e será sincronizado depois.')
+       
+       queryClient.setQueryData(QUERY_KEYS.accounts, (old: any) => {
+         if (!old) return old
+         const parsedLimit = payload.credit_limit ? Number(payload.credit_limit.toString().replace('.', '').replace(',', '.')) : null
+         if (isEditing) {
+           return old.map((a: any) => a.id === initialData.id ? {
+             ...a,
+             name: payload.name,
+             type: 'credit_card',
+             icon: payload.icon,
+             color: payload.color,
+             credit_limit: parsedLimit,
+             closing_day: payload.closing_day ? parseInt(payload.closing_day.toString(), 10) : null,
+             due_day: payload.due_day ? parseInt(payload.due_day.toString(), 10) : null,
+             include_in_dashboard: payload.include_in_dashboard === 'true'
+           } : a)
+         } else {
+           const fakeAcc = {
+             id: newMutation.id,
+             name: payload.name,
+             type: 'credit_card',
+             icon: payload.icon,
+             color: payload.color,
+             initial_balance: 0,
+             credit_limit: parsedLimit,
+             closing_day: payload.closing_day ? parseInt(payload.closing_day.toString(), 10) : null,
+             due_day: payload.due_day ? parseInt(payload.due_day.toString(), 10) : null,
+             include_in_dashboard: payload.include_in_dashboard === 'true',
+             account_vaults: []
+           }
+           return [...old, fakeAcc]
+         }
+       })
+       
+       if (onSuccess) onSuccess()
+       setIsPendingLocal(false)
+       return
+    }
+
+    try {
+      const res = await actionToUse(null, formData)
+      if (res?.error) {
+         setLocalError(res.error)
+      } else {
+         invalidateData()
+         router.refresh()
+         if (onSuccess) onSuccess()
+      }
+    } catch (err: any) {
+      if (err.message && (err.message.includes('fetch') || err.message.includes('Network'))) {
+        await enqueueMutation({
+           actionType: isEditing ? 'UPDATE_ACCOUNT' : 'CREATE_ACCOUNT',
+           payload: { ...payload, id: initialData?.id }
+        })
+        toast.info('Falha na conexão. Cartão de crédito salvo offline e será sincronizado depois.')
+        invalidateData()
+        if (onSuccess) onSuccess()
+      } else {
+        setLocalError('Erro ao salvar cartão.')
+      }
+    }
+    setIsPendingLocal(false)
+  }
+
   return (
-    <form action={formAction} className="flex flex-col gap-5">
+    <form action={customAction} className="flex flex-col gap-5">
       {initialData && <input type="hidden" name="id" value={initialData.id} />}
       <input type="hidden" name="workspace_id" value={workspaceId} />
       <input type="hidden" name="type" value="credit_card" />
       <input type="hidden" name="icon" value={selectedEmoji} />
       <input type="hidden" name="color" value={selectedColor} />
       
-      {state.error && (
+      {localError && (
         <div className="p-3 text-sm text-rose-600 bg-rose-50 border border-rose-200 rounded-xl font-medium">
-          {state.error}
+          {localError}
         </div>
       )}
 
