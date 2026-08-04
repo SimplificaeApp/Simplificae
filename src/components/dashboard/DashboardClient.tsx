@@ -135,7 +135,22 @@ export function DashboardClient({
   const [includeVaults, setIncludeVaults] = useState<boolean>(false);
   const [showFilters, setShowFilters] = useState(false);
   const [activeChartTab, setActiveChartTab] = useState<'fluxo' | 'macro' | 'gastos' | 'saldo' | 'saude'>('fluxo');
+  const [distributionTab, setDistributionTab] = useState<'expense' | 'income'>('expense');
+  const [hiddenExpenseCategories, setHiddenExpenseCategories] = useState<string[]>([]);
+  const [hiddenIncomeCategories, setHiddenIncomeCategories] = useState<string[]>([]);
   const { isUnlocked, globalBlur, toggleGlobalBlur, requestUnlock, lock } = usePrivacy();
+
+  const toggleHiddenExpenseCategory = (name: string) => {
+    setHiddenExpenseCategories(prev =>
+      prev.includes(name) ? prev.filter(n => n !== name) : [...prev, name]
+    );
+  };
+
+  const toggleHiddenIncomeCategory = (name: string) => {
+    setHiddenIncomeCategories(prev =>
+      prev.includes(name) ? prev.filter(n => n !== name) : [...prev, name]
+    );
+  };
 
   const [detailModal, setDetailModal] = useState<{
     title: string;
@@ -413,6 +428,37 @@ export function DashboardClient({
       }));
   }, [currentMonthTx, categories]);
 
+  // Donut data: top categories by income amount (Only Current Month)
+  const donutIncomeData = useMemo(() => {
+    const catMap = new Map<string, { name: string; icon: string; value: number }>();
+    currentMonthTx.forEach((t) => {
+      if (t.type === "income") {
+        const resolvedCat = t.category || categories.find(c => c.id === (t as any).category_id);
+        const catName = resolvedCat?.name || "Outras Entradas";
+        const catIcon = resolvedCat?.icon || "💰";
+
+        const existing = catMap.get(catName);
+        if (existing) {
+          existing.value += Number(t.amount);
+        } else {
+          catMap.set(catName, { name: catName, icon: catIcon, value: Number(t.amount) });
+        }
+      }
+    });
+
+    const INCOME_PALETTE = [
+      "#10b981", "#06b6d4", "#3b82f6", "#8b5cf6",
+      "#f59e0b", "#84cc16", "#ec4899", "#14b8a6"
+    ];
+
+    return Array.from(catMap.values())
+      .sort((a, b) => b.value - a.value)
+      .map((item, idx) => ({
+        ...item,
+        color: INCOME_PALETTE[idx % INCOME_PALETTE.length]
+      }));
+  }, [currentMonthTx, categories]);
+
   // Macro Bar Chart (Last 6 Months) — must come before ECharts options
   const macroBarData = useMemo(() => {
     const now = new Date();
@@ -536,34 +582,74 @@ export function DashboardClient({
   }), [macroBarData])
 
   // ECharts options — Donut Despesas
-  const donutExpenseOption = useMemo(() => ({
-    tooltip: {
-      trigger: 'item',
-      extraCssText: 'z-index: 10 !important;',
-      backgroundColor: 'rgba(255,255,255,0.97)',
-      borderColor: '#e2e8f0',
-      borderWidth: 1,
-      borderRadius: 12,
-      padding: [10, 14],
-      textStyle: { color: '#334155', fontSize: 12, fontFamily: 'inherit' },
-      formatter: (p: any) => {
-        const fmt = (v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
-        const icon = p.data.icon ? `${p.data.icon} ` : '';
-        return `<div style="display:flex;align-items:center;gap:8px;margin-bottom:4px"><span style="width:10px;height:10px;border-radius:50%;background:${p.color};display:inline-block"></span><span style="font-weight:700;color:#334155">${icon}${p.name}</span></div>` +
-          `<div style="font-size:15px;font-weight:900;color:#0f172a">${fmt(p.value)}</div>` +
-          `<div style="font-size:10px;color:#94a3b8;margin-top:2px">${p.percent.toFixed(1)}% do total</div>`
-      }
-    },
-    legend: { type: 'scroll', orient: 'horizontal', bottom: 0, textStyle: { color: '#64748b', fontSize: 11, fontFamily: 'inherit' }, icon: 'circle', itemWidth: 8, itemHeight: 8 },
-    series: [{
-      type: 'pie', radius: ['48%', '72%'], center: ['50%', '44%'],
-      padAngle: 2, minAngle: 3, itemStyle: { borderRadius: 6 },
-      label: { show: false },
-      emphasis: { scale: true, scaleSize: 8, itemStyle: { shadowBlur: 16, shadowOffsetY: 6, shadowColor: 'rgba(0,0,0,0.15)' } },
-      data: donutData.map((d) => ({ name: d.name, icon: d.icon, value: d.value, itemStyle: { color: d.color } })),
-      animationType: 'expansion', animationDuration: 1000, animationEasing: 'cubicOut'
-    }]
-  }), [donutData])
+  const donutExpenseOption = useMemo(() => {
+    const visibleData = donutData.filter(d => !hiddenExpenseCategories.includes(d.name));
+    return {
+      tooltip: {
+        trigger: 'item',
+        extraCssText: 'z-index: 10 !important;',
+        backgroundColor: 'rgba(255,255,255,0.97)',
+        borderColor: '#e2e8f0',
+        borderWidth: 1,
+        borderRadius: 12,
+        padding: [10, 14],
+        textStyle: { color: '#334155', fontSize: 12, fontFamily: 'inherit' },
+        formatter: (p: any) => {
+          const fmt = (v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
+          const icon = p.data.icon ? `${p.data.icon} ` : '';
+          return `<div style="display:flex;align-items:center;gap:8px;margin-bottom:4px"><span style="width:10px;height:10px;border-radius:50%;background:${p.color};display:inline-block"></span><span style="font-weight:700;color:#334155">${icon}${p.name}</span></div>` +
+            `<div style="font-size:15px;font-weight:900;color:#0f172a">${fmt(p.value)}</div>` +
+            `<div style="font-size:10px;color:#94a3b8;margin-top:2px">${p.percent.toFixed(1)}% do total</div>`
+        }
+      },
+      legend: { show: false },
+      series: [{
+        type: 'pie', radius: ['48%', '72%'], center: ['50%', '44%'],
+        padAngle: 2, minAngle: 3, itemStyle: { borderRadius: 6 },
+        label: { show: false },
+        emphasis: { scale: true, scaleSize: 8, itemStyle: { shadowBlur: 16, shadowOffsetY: 6, shadowColor: 'rgba(0,0,0,0.15)' } },
+        data: visibleData.length > 0
+          ? visibleData.map((d) => ({ name: d.name, icon: d.icon, value: d.value, itemStyle: { color: d.color } }))
+          : [{ value: 1, name: hiddenExpenseCategories.length > 0 ? 'Fatias ocultadas' : 'Sem dados', itemStyle: { color: '#e2e8f0' } }],
+        animationType: 'expansion', animationDuration: 1000, animationEasing: 'cubicOut'
+      }]
+    };
+  }, [donutData, hiddenExpenseCategories]);
+
+  // ECharts options — Donut Entradas
+  const donutIncomeOption = useMemo(() => {
+    const visibleData = donutIncomeData.filter(d => !hiddenIncomeCategories.includes(d.name));
+    return {
+      tooltip: {
+        trigger: 'item',
+        extraCssText: 'z-index: 10 !important;',
+        backgroundColor: 'rgba(255,255,255,0.97)',
+        borderColor: '#e2e8f0',
+        borderWidth: 1,
+        borderRadius: 12,
+        padding: [10, 14],
+        textStyle: { color: '#334155', fontSize: 12, fontFamily: 'inherit' },
+        formatter: (p: any) => {
+          const fmt = (v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
+          const icon = p.data.icon ? `${p.data.icon} ` : '';
+          return `<div style="display:flex;align-items:center;gap:8px;margin-bottom:4px"><span style="width:10px;height:10px;border-radius:50%;background:${p.color};display:inline-block"></span><span style="font-weight:700;color:#334155">${icon}${p.name}</span></div>` +
+            `<div style="font-size:15px;font-weight:900;color:#0f172a">${fmt(p.value)}</div>` +
+            `<div style="font-size:10px;color:#94a3b8;margin-top:2px">${p.percent.toFixed(1)}% do total</div>`
+        }
+      },
+      legend: { show: false },
+      series: [{
+        type: 'pie', radius: ['48%', '72%'], center: ['50%', '44%'],
+        padAngle: 2, minAngle: 3, itemStyle: { borderRadius: 6 },
+        label: { show: false },
+        emphasis: { scale: true, scaleSize: 8, itemStyle: { shadowBlur: 16, shadowOffsetY: 6, shadowColor: 'rgba(0,0,0,0.15)' } },
+        data: visibleData.length > 0
+          ? visibleData.map((d) => ({ name: d.name, icon: d.icon, value: d.value, itemStyle: { color: d.color } }))
+          : [{ value: 1, name: hiddenIncomeCategories.length > 0 ? 'Fatias ocultadas' : 'Sem dados', itemStyle: { color: '#e2e8f0' } }],
+        animationType: 'expansion', animationDuration: 1000, animationEasing: 'cubicOut'
+      }]
+    };
+  }, [donutIncomeData, hiddenIncomeCategories]);
 
   // ECharts options — Donut Distribuição
   const donutDistOption = useMemo(() => ({
@@ -906,50 +992,134 @@ export function DashboardClient({
             </div>
           </motion.div>
 
-          {/* Category Spending Breakdown (1 Column) */}
+          {/* Category Spending / Income Breakdown (1 Column) */}
           <motion.div
             {...fadeUp}
             transition={{ duration: 0.35, delay: 0.3 }}
             className="glass-panel rounded-2xl p-5 md:p-6 border border-slate-200/80 shadow-xs flex flex-col justify-between"
           >
             <div>
-              <h3 className="font-bold text-slate-800 text-sm sm:text-base mb-0.5">Top Gastos por Categoria</h3>
-              <p className="text-xs text-slate-500 font-medium mb-4">Clique no gráfico ou item para ver detalhes</p>
-            </div>
-
-            {donutData.length > 0 ? (
-              <div className="flex flex-col gap-4">
-                <div className="h-44 w-full cursor-pointer">
-                  <ReactECharts notMerge={true} lazyUpdate={true} option={donutExpenseOption} onEvents={chartEvents} style={{ height: '100%', width: '100%' }} />
+              <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 mb-3">
+                <div>
+                  <h3 className="font-bold text-slate-800 text-sm sm:text-base mb-0.5">
+                    {distributionTab === 'expense' ? 'Top Gastos por Categoria' : 'Top Entradas por Categoria'}
+                  </h3>
+                  <p className="text-xs text-slate-500 font-medium">Clique no ícone de olho para ocultar a fatia do gráfico</p>
                 </div>
 
+                <div className="flex bg-slate-100 p-1 rounded-xl text-xs font-bold shrink-0 self-stretch sm:self-auto">
+                  <button
+                    type="button"
+                    onClick={() => setDistributionTab('expense')}
+                    className={`flex-1 sm:flex-none px-2.5 py-1 rounded-lg transition-all flex items-center justify-center gap-1 ${
+                      distributionTab === 'expense' ? 'bg-white text-rose-600 shadow-xs font-extrabold' : 'text-slate-500 hover:text-slate-800'
+                    }`}
+                  >
+                    <span>💸 Despesas</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setDistributionTab('income')}
+                    className={`flex-1 sm:flex-none px-2.5 py-1 rounded-lg transition-all flex items-center justify-center gap-1 ${
+                      distributionTab === 'income' ? 'bg-white text-emerald-600 shadow-xs font-extrabold' : 'text-slate-500 hover:text-slate-800'
+                    }`}
+                  >
+                    <span>💰 Entradas</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            {((distributionTab === 'expense' ? donutData : donutIncomeData).length > 0) ? (
+              <div className="flex flex-col gap-4">
+                <div className="h-44 w-full cursor-pointer">
+                  <ReactECharts
+                    notMerge={true}
+                    lazyUpdate={true}
+                    option={distributionTab === 'expense' ? donutExpenseOption : donutIncomeOption}
+                    onEvents={chartEvents}
+                    style={{ height: '100%', width: '100%' }}
+                  />
+                </div>
+
+                {/* Banner de alerta para fatias ocultas se houver */}
+                {((distributionTab === 'expense' && hiddenExpenseCategories.length > 0) ||
+                  (distributionTab === 'income' && hiddenIncomeCategories.length > 0)) && (
+                  <div className="flex justify-between items-center text-[11px] px-2 py-1 bg-amber-50 rounded-xl border border-amber-200/60 text-amber-800 font-bold">
+                    <span>⚠️ {distributionTab === 'expense' ? hiddenExpenseCategories.length : hiddenIncomeCategories.length} fatia(s) oculta(s)</span>
+                    <button
+                      onClick={() => {
+                        if (distributionTab === 'expense') setHiddenExpenseCategories([]);
+                        else setHiddenIncomeCategories([]);
+                      }}
+                      className="text-indigo-600 hover:underline"
+                    >
+                      Mostrar todas
+                    </button>
+                  </div>
+                )}
+
                 <div className="flex flex-col gap-2 pt-2 border-t border-slate-100 max-h-52 overflow-y-auto pr-1 custom-scrollbar">
-                  {donutData.map((d, i) => {
-                    const pct = totalExpenses > 0 ? Math.round((d.value / totalExpenses) * 100) : 0;
+                  {(distributionTab === 'expense' ? donutData : donutIncomeData).map((d) => {
+                    const totalRef = distributionTab === 'expense' ? totalExpenses : totalIncomes;
+                    const pct = totalRef > 0 ? Math.round((d.value / totalRef) * 100) : 0;
+                    const isHidden = distributionTab === 'expense'
+                      ? hiddenExpenseCategories.includes(d.name)
+                      : hiddenIncomeCategories.includes(d.name);
+
                     return (
                       <div
                         key={d.name}
-                        onClick={() => setDetailModal({
-                          title: `Gastos em ${d.name}`,
-                          subtitle: `Lançamentos na categoria ${d.name}`,
-                          type: 'category',
-                          categoryName: d.name
-                        })}
-                        className="flex items-center justify-between text-xs p-1.5 rounded-xl hover:bg-slate-100/70 transition-colors cursor-pointer group"
+                        className={`flex items-center justify-between text-xs p-1.5 rounded-xl transition-all ${
+                          isHidden ? 'opacity-40 bg-slate-100/50' : 'hover:bg-slate-100/70'
+                        }`}
                       >
-                        <div className="flex items-center gap-2 min-w-0 flex-1 pr-2">
-                          <span className="text-sm shrink-0">{d.icon || '🏷️'}</span>
+                        {/* Clique no nome abre o modal de detalhe mantendo a funcionalidade existente */}
+                        <div
+                          onClick={() => setDetailModal({
+                            title: `${distributionTab === 'expense' ? 'Gastos' : 'Entradas'} em ${d.name}`,
+                            subtitle: `Lançamentos na categoria ${d.name}`,
+                            type: distributionTab === 'expense' ? 'category' : 'incomes',
+                            categoryName: d.name
+                          })}
+                          className="flex items-center gap-2 min-w-0 flex-1 pr-2 cursor-pointer group"
+                          title="Clique para ver detalhes desta categoria"
+                        >
+                          <span className="text-sm shrink-0">{d.icon || (distributionTab === 'expense' ? '🏷️' : '💰')}</span>
                           <span
                             className="w-2.5 h-2.5 rounded-full shrink-0"
                             style={{ backgroundColor: d.color }}
                           />
-                          <span className="font-bold text-slate-700 truncate group-hover:text-emerald-600 transition-colors">{d.name}</span>
+                          <span className={`font-bold truncate ${isHidden ? 'line-through text-slate-400' : 'text-slate-700 group-hover:text-emerald-600 transition-colors'}`}>
+                            {d.name}
+                          </span>
                         </div>
+
+                        {/* Valor + Porcentagem + Olho para Ocultar/Exibir fatia no gráfico */}
                         <div className="flex items-center gap-2 font-bold tabular-nums shrink-0">
                           <span className="text-slate-500 text-[11px] font-semibold">{pct}%</span>
-                          <span className={`text-slate-800 ${globalBlur && !isUnlocked ? 'blur-xs select-none' : ''}`}>
+                          <span
+                            onClick={() => {
+                              if (distributionTab === 'expense') toggleHiddenExpenseCategory(d.name);
+                              else toggleHiddenIncomeCategory(d.name);
+                            }}
+                            className={`text-slate-800 cursor-pointer ${globalBlur && !isUnlocked ? 'blur-xs select-none' : ''} ${isHidden ? 'line-through text-slate-400' : ''}`}
+                            title={isHidden ? "Exibir no gráfico" : "Ocultar do gráfico"}
+                          >
                             {globalBlur && !isUnlocked ? '••••' : currencyFmt.format(d.value)}
                           </span>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              if (distributionTab === 'expense') toggleHiddenExpenseCategory(d.name);
+                              else toggleHiddenIncomeCategory(d.name);
+                            }}
+                            className="p-1 rounded-lg hover:bg-slate-200/70 text-slate-400 hover:text-slate-600 transition-colors"
+                            title={isHidden ? "Exibir no gráfico" : "Ocultar do gráfico"}
+                          >
+                            {isHidden ? <EyeOff className="w-3.5 h-3.5 text-slate-400" /> : <Eye className="w-3.5 h-3.5 text-emerald-600" />}
+                          </button>
                         </div>
                       </div>
                     );
@@ -959,7 +1129,9 @@ export function DashboardClient({
             ) : (
               <div className="h-60 flex flex-col items-center justify-center text-center gap-2 text-slate-400">
                 <BarChart3 className="w-8 h-8 text-slate-300" />
-                <p className="text-xs font-semibold">Nenhuma despesa registrada este mês</p>
+                <p className="text-xs font-semibold">
+                  {distributionTab === 'expense' ? 'Nenhuma despesa registrada este mês' : 'Nenhuma entrada registrada este mês'}
+                </p>
               </div>
             )}
           </motion.div>

@@ -11,12 +11,24 @@ export function PwaRegister() {
   const [isStandalone, setIsStandalone] = useState(false)
 
   useEffect(() => {
-    // Register Service Worker
+    // Register Service Worker & handle auto-updates on new deploy
     if (typeof window !== 'undefined' && 'serviceWorker' in navigator) {
       navigator.serviceWorker
         .register('/sw.js')
         .then((reg) => {
           console.log('[PWA] Service Worker registrado:', reg.scope)
+
+          reg.onupdatefound = () => {
+            const installingWorker = reg.installing
+            if (installingWorker) {
+              installingWorker.onstatechange = () => {
+                if (installingWorker.state === 'installed' && navigator.serviceWorker.controller) {
+                  console.log('[PWA] Nova versão instalada. Atualizando aplicativo...')
+                  window.location.reload()
+                }
+              }
+            }
+          }
         })
         .catch((err) => {
           console.error('[PWA] Erro no SW:', err)

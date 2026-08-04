@@ -19,7 +19,8 @@ export function useTransactionsQuery(initialData?: any[]) {
   const queryClient = useQueryClient()
 
   useEffect(() => {
-    if (initialData && initialData.length > 0) {
+    const existing = queryClient.getQueryData(QUERY_KEYS.transactions)
+    if (!existing && initialData && initialData.length > 0) {
       queryClient.setQueryData(QUERY_KEYS.transactions, initialData)
     }
   }, [initialData, queryClient])
@@ -40,7 +41,7 @@ export function useTransactionsQuery(initialData?: any[]) {
       }
       return data || []
     },
-    initialData: initialData && initialData.length > 0 ? initialData : undefined,
+    placeholderData: (previousData) => previousData || (initialData && initialData.length > 0 ? initialData : undefined),
   })
 }
 
@@ -51,7 +52,8 @@ export function useAccountsQuery(initialData?: any[]) {
   const queryClient = useQueryClient()
 
   useEffect(() => {
-    if (initialData && initialData.length > 0) {
+    const existing = queryClient.getQueryData(QUERY_KEYS.accounts)
+    if (!existing && initialData && initialData.length > 0) {
       queryClient.setQueryData(QUERY_KEYS.accounts, initialData)
     }
   }, [initialData, queryClient])
@@ -71,7 +73,7 @@ export function useAccountsQuery(initialData?: any[]) {
       }
       return data || []
     },
-    initialData: initialData && initialData.length > 0 ? initialData : undefined,
+    placeholderData: (previousData) => previousData || (initialData && initialData.length > 0 ? initialData : undefined),
   })
 }
 
@@ -82,7 +84,8 @@ export function useCategoriesQuery(initialData?: any[]) {
   const queryClient = useQueryClient()
 
   useEffect(() => {
-    if (initialData && initialData.length > 0) {
+    const existing = queryClient.getQueryData(QUERY_KEYS.categories)
+    if (!existing && initialData && initialData.length > 0) {
       queryClient.setQueryData(QUERY_KEYS.categories, initialData)
     }
   }, [initialData, queryClient])
@@ -102,7 +105,7 @@ export function useCategoriesQuery(initialData?: any[]) {
       }
       return data || []
     },
-    initialData: initialData && initialData.length > 0 ? initialData : undefined,
+    placeholderData: (previousData) => previousData || (initialData && initialData.length > 0 ? initialData : undefined),
   })
 }
 

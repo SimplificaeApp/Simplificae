@@ -1,8 +1,8 @@
 'use client'
 
 import { useState, useRef, useEffect } from 'react'
-import { motion, AnimatePresence } from 'framer-motion'
-import { Sparkles, Loader2, ArrowRight, X, Bot, Mic, MicOff, MessageSquare } from 'lucide-react'
+import { motion, AnimatePresence, useDragControls } from 'framer-motion'
+import { Sparkles, Loader2, ArrowRight, X, Bot, Mic, MicOff, MessageSquare, GripHorizontal } from 'lucide-react'
 import { parseNaturalLanguageTransaction } from '@/app/actions/ai'
 import { toast } from 'sonner'
 import { Modal } from '@/components/ui/Modal'
@@ -24,6 +24,26 @@ export function AiFloatingButton({
   const [isAiLoading, setIsAiLoading] = useState(false)
   const [isListening, setIsListening] = useState(false)
   const [isOffline, setIsOffline] = useState(false)
+
+  const dragControls = useDragControls()
+  const isDraggingRef = useRef(false)
+  const [dragBounds, setDragBounds] = useState({ left: -300, right: 0, top: -500, bottom: 0 })
+
+  useEffect(() => {
+    const updateBounds = () => {
+      if (typeof window !== 'undefined') {
+        setDragBounds({
+          left: -(window.innerWidth - 80),
+          right: 0,
+          top: -(window.innerHeight - 80),
+          bottom: 0
+        })
+      }
+    }
+    updateBounds()
+    window.addEventListener('resize', updateBounds)
+    return () => window.removeEventListener('resize', updateBounds)
+  }, [])
   
   useEffect(() => {
     if (typeof window !== 'undefined') {
@@ -91,7 +111,23 @@ export function AiFloatingButton({
 
   return (
     <>
-      <div className="fixed bottom-6 right-6 z-40 flex flex-col items-end gap-4">
+      <motion.div
+        drag
+        dragControls={dragControls}
+        dragListener={false}
+        dragMomentum={false}
+        dragElastic={0.05}
+        dragConstraints={dragBounds}
+        onDragStart={() => {
+          isDraggingRef.current = true
+        }}
+        onDragEnd={() => {
+          setTimeout(() => {
+            isDraggingRef.current = false
+          }, 100)
+        }}
+        className="fixed bottom-6 right-6 z-40 flex flex-col items-end gap-3 touch-none"
+      >
         <AnimatePresence>
           {isOpen && (
             <motion.div
@@ -99,11 +135,23 @@ export function AiFloatingButton({
               animate={{ opacity: 1, y: 0, scale: 1, filter: 'blur(0px)' }}
               exit={{ opacity: 0, y: 20, scale: 0.9, filter: 'blur(10px)' }}
               transition={{ type: 'spring', damping: 25, stiffness: 300 }}
-              className="bg-white/95 backdrop-blur-xl border border-violet-100 shadow-[0_20px_60px_-15px_rgba(99,102,241,0.3)] p-5 rounded-3xl w-[calc(100vw-48px)] sm:w-[380px] overflow-hidden relative"
+              className="bg-white/95 backdrop-blur-xl border border-violet-100 shadow-[0_20px_60px_-15px_rgba(99,102,241,0.3)] p-5 pt-3 rounded-3xl w-[calc(100vw-48px)] sm:w-[380px] overflow-hidden relative"
             >
               {/* Decorative gradient background */}
               <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-violet-500 via-indigo-500 to-purple-500" />
               
+              {/* Alça de Arraste da Janela */}
+              <div
+                onPointerDown={(e) => {
+                  isDraggingRef.current = false
+                  dragControls.start(e)
+                }}
+                className="w-full flex items-center justify-center py-1 cursor-grab active:cursor-grabbing text-slate-300 hover:text-slate-500 transition-colors"
+                title="Arraste para mover"
+              >
+                <GripHorizontal className="w-6 h-4" />
+              </div>
+
               <div className="flex justify-between items-center mb-4">
                 <div className="flex items-center gap-2.5">
                   <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-violet-500 to-indigo-600 flex items-center justify-center shadow-md shadow-violet-200">
@@ -187,12 +235,20 @@ export function AiFloatingButton({
         <motion.button
           whileHover={{ scale: 1.05 }}
           whileTap={{ scale: 0.95 }}
-          onClick={() => setIsOpen(!isOpen)}
-          className={`relative p-4 rounded-full flex items-center justify-center transition-all duration-300 shadow-xl ${
+          onPointerDown={(e) => {
+            isDraggingRef.current = false
+            dragControls.start(e)
+          }}
+          onClick={() => {
+            if (isDraggingRef.current) return
+            setIsOpen(!isOpen)
+          }}
+          className={`relative p-4 rounded-full flex items-center justify-center transition-all duration-300 shadow-xl cursor-grab active:cursor-grabbing ${
             isOpen 
               ? 'bg-slate-800 text-white shadow-slate-500/20 rotate-90' 
               : 'bg-gradient-to-br from-violet-600 to-indigo-600 text-white shadow-indigo-500/30'
           }`}
+          title="Arraste para mover o botão de IA ou clique para abrir"
         >
           {/* Animated glow effect behind button */}
           {!isOpen && (
@@ -201,7 +257,7 @@ export function AiFloatingButton({
           
           {isOpen ? <X className="w-6 h-6" strokeWidth={2.5} /> : <Sparkles className="w-6 h-6" strokeWidth={2.5} />}
         </motion.button>
-      </div>
+      </motion.div>
 
       <Modal 
         isOpen={isTxModalOpen} 

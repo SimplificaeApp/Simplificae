@@ -29,12 +29,13 @@ export function QueryProvider({ children }: QueryProviderProps) {
       new QueryClient({
         defaultOptions: {
           queries: {
-            staleTime: Infinity, // Keep cached data fresh indefinitely unless explicitly invalidated
+            staleTime: 1000 * 5, // Serve instantly from cache, but revalidate after 15 seconds
             gcTime: 1000 * 60 * 60 * 24, // Keep unused data in cache for 24 hours
-            refetchOnWindowFocus: false, // Prevent query spam when switching tabs/windows
-            refetchOnReconnect: true, // Revalidate when internet connection is restored
+            refetchOnWindowFocus: 'always', // Sync background changes whenever app is re-focused
+            refetchOnReconnect: true, // Sync when returning online
+            refetchInterval: 1000 * 60, // Periodically revalidate in background every 60s when active
             retry: 1,
-            networkMode: 'offlineFirst', // Allow queries and mutations to be paused when offline instead of failing
+            networkMode: 'offlineFirst', // Serve offline cache smoothly
           },
         },
       })

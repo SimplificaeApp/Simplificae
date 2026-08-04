@@ -25,7 +25,9 @@ import {
   Edit2,
   Sliders,
   Check,
-  Repeat
+  Repeat,
+  Eye,
+  EyeOff
 } from 'lucide-react'
 import dynamic from 'next/dynamic'
 import { Modal } from '@/components/ui/Modal'
@@ -116,6 +118,11 @@ export function PlannedClient({
   const [kpiModal, setKpiModal] = useState<{ title: string; type: 'income' | 'fixed' | 'variable' | 'investments' } | null>(null)
   const [chartCostFilter, setChartCostFilter] = useState<'all' | 'fixed' | 'variable'>('all')
   const [showAllVariableCategories, setShowAllVariableCategories] = useState(false)
+  // Estados para Gráficos de Rosca e Visão Global (Planejado vs Realizado)
+  const [dataMode, setDataMode] = useState<'planned' | 'realized'>('planned')
+  const [distributionTab, setDistributionTab] = useState<'expense' | 'income'>('expense')
+  const [hiddenExpenseCategoryIds, setHiddenExpenseCategoryIds] = useState<string[]>([])
+  const [hiddenIncomeCategoryIds, setHiddenIncomeCategoryIds] = useState<string[]>([])
   const { data: cachedTransactions } = useTransactionsQuery(initialTransactions)
   const { data: cachedCategories } = useCategoriesQuery(initialCategories)
   const { data: cachedAccounts } = useAccountsQuery(initialAccounts)
@@ -331,13 +338,20 @@ export function PlannedClient({
     }
   }, [incomeCategories, fixedCategories, variableCategories, investmentCategories, cycleTransactions, accountsMap])
 
-  // Filtragem de dados especificamente para os gráficos com base no chartCostFilter
+  // Filtragem de dados especificamente para os gráficos com base no chartCostFilter e dataMode
   const filteredSpentPerCategory = useMemo(() => {
     const fixedCategoryIds = new Set(fixedCategories.map(c => c.id))
     const map: Record<string, number> = {}
 
     cycleTransactions.forEach(t => {
       if (t.category_id && t.type === 'expense') {
+        if (dataMode === 'realized') {
+          const acc = t.account_id ? accountsMap[t.account_id] : (t.account || null)
+          const isCreditCard = Boolean(acc && acc.type === 'credit_card')
+          const isConfirmed = isCreditCard ? t.status === 'paid_planned' : (t.status === 'paid_planned' || t.status === 'posted')
+          if (!isConfirmed) return
+        }
+
         const isFix = Boolean(t.is_recurring) || Boolean(t.category_id && fixedCategoryIds.has(t.category_id))
         if (chartCostFilter === 'fixed' && !isFix) return
         if (chartCostFilter === 'variable' && isFix) return
@@ -346,7 +360,25 @@ export function PlannedClient({
       }
     })
     return map
-  }, [cycleTransactions, chartCostFilter, fixedCategories])
+  }, [cycleTransactions, chartCostFilter, fixedCategories, dataMode, accountsMap])
+
+  // Receitas por categoria no ciclo (respeita dataMode)
+  const receivedPerIncomeCategory = useMemo(() => {
+    const map: Record<string, number> = {}
+    cycleTransactions.forEach(t => {
+      if (t.category_id && t.type === 'income') {
+        if (dataMode === 'realized') {
+          const acc = t.account_id ? accountsMap[t.account_id] : (t.account || null)
+          const isCreditCard = Boolean(acc && acc.type === 'credit_card')
+          const isConfirmed = isCreditCard ? t.status === 'paid_planned' : (t.status === 'paid_planned' || t.status === 'posted')
+          if (!isConfirmed) return
+        }
+
+        map[t.category_id] = (map[t.category_id] || 0) + Number(t.amount)
+      }
+    })
+    return map
+  }, [cycleTransactions, dataMode, accountsMap]) 
 
   // Category Legend Data for HTML Legend Grid
   const categoryLegendData = useMemo(() => {
@@ -399,17 +431,93 @@ export function PlannedClient({
     return data
   }, [categories, filteredSpentPerCategory])
 
-  // Chart Options - Top 5 Maiores Categorias de Gasto (Limpo sem números sobrepostos no eixo X)
-  const topCategoriesChartOption = useMemo(() => {
-    const catSpending: { name: string; value: number }[] = []
-    categories.forEach(c => {
-      const val = filteredSpentPerCategory[c.id] || 0
+  // Income Legend Data for HTML Legend Grid
+  const incomeLegendData = useMemo(() => {
+    const data: { id: string; name: string; icon: string; value: number; color: string; percent: number }[] = []
+    const PALETTE = [
+      '#10b981', // Emerald
+      '#06b6d4', // Cyan
+      '#3b82f6', // Blue
+      '#8b5cf6', // Purple
+      '#f59e0b', // Amber
+      '#84cc16', // Lime
+      '#ec4899', // Pink
+      '#14b8a6', // Teal
+    ]
+
+    let total = 0
+    incomeCategories.forEach(c => {
+      total += receivedPerIncomeCategory[c.id] || 0
+    })
+    if (total === 0) total = 1
+
+    const usedColors = new Set<string>()
+
+    incomeCategories.forEach((c) => {
+      const val = receivedPerIncomeCategory[c.id] || 0
       if (val > 0) {
-        catSpending.push({ name: `${c.icon || '📌'} ${c.name}`, value: val })
+        let assignedColor = c.color || PALETTE[data.length % PALETTE.length]
+        const isGenericDefault = assignedColor.toLowerCase() === '#ef4444' || assignedColor.toLowerCase() === '#10b981'
+
+        if (isGenericDefault || usedColors.has(assignedColor.toLowerCase())) {
+          assignedColor = PALETTE[data.length % PALETTE.length]
+        }
+        usedColors.add(assignedColor.toLowerCase())
+
+        data.push({
+          id: c.id,
+          name: c.name,
+          icon: c.icon || '💰',
+          value: val,
+          color: assignedColor,
+          percent: Math.round((val / total) * 100)
+        })
       }
     })
-    catSpending.sort((a, b) => a.value - b.value)
-    const top5 = catSpending.slice(-5)
+    data.sort((a, b) => b.value - a.value)
+    return data
+  }, [incomeCategories, receivedPerIncomeCategory])
+
+  // Helpers para alternar exibição de categorias nos gráficos
+  const toggleHiddenExpenseCategory = (id: string) => {
+    setHiddenExpenseCategoryIds(prev =>
+      prev.includes(id) ? prev.filter(cId => cId !== id) : [...prev, id]
+    )
+  }
+
+  const toggleHiddenIncomeCategory = (id: string) => {
+    setHiddenIncomeCategoryIds(prev =>
+      prev.includes(id) ? prev.filter(cId => cId !== id) : [...prev, id]
+    )
+  }
+
+  // Chart Options - Top 5 Maiores Categorias (Gastos ou Entradas conforme a aba selecionada)
+  const topCategoriesChartOption = useMemo(() => {
+    const list: { name: string; value: number }[] = []
+    const isExpense = distributionTab === 'expense'
+
+    if (isExpense) {
+      categories.forEach(c => {
+        const val = filteredSpentPerCategory[c.id] || 0
+        if (val > 0) {
+          list.push({ name: `${c.icon || '📌'} ${c.name}`, value: val })
+        }
+      })
+    } else {
+      incomeCategories.forEach(c => {
+        const val = receivedPerIncomeCategory[c.id] || 0
+        if (val > 0) {
+          list.push({ name: `${c.icon || '💰'} ${c.name}`, value: val })
+        }
+      })
+    }
+
+    list.sort((a, b) => a.value - b.value)
+    const top5 = list.slice(-5)
+
+    const colors = isExpense
+      ? ['#818cf8', '#6366f1', '#4f46e5', '#4338ca', '#3730a3']
+      : ['#34d399', '#10b981', '#059669', '#047857', '#065f46']
 
     return {
       tooltip: {
@@ -437,10 +545,7 @@ export function PlannedClient({
           type: 'bar',
           data: top5.map(i => i.value),
           itemStyle: {
-            color: (params: any) => {
-              const colors = ['#818cf8', '#6366f1', '#4f46e5', '#4338ca', '#3730a3']
-              return colors[params.dataIndex % colors.length]
-            },
+            color: (params: any) => colors[params.dataIndex % colors.length],
             borderRadius: [0, 6, 6, 0]
           },
           label: {
@@ -454,12 +559,13 @@ export function PlannedClient({
         }
       ]
     }
-  }, [categories, filteredSpentPerCategory])
+  }, [categories, incomeCategories, filteredSpentPerCategory, receivedPerIncomeCategory, distributionTab])
 
 
-  // Chart Options - ECharts Donut Chart (Distribuição por Categoria Real com Ícones nas Fatias)
+  // Chart Options - ECharts Donut Chart (Distribuição por Categoria Real de Despesas com Filtro de Ocultação)
   const donutChartOption = useMemo(() => {
-    const data = categoryLegendData.map(item => ({
+    const visibleLegend = categoryLegendData.filter(item => !hiddenExpenseCategoryIds.includes(item.id))
+    const data = visibleLegend.map(item => ({
       name: `${item.icon} ${item.name}`,
       value: item.value,
       icon: item.icon,
@@ -505,11 +611,66 @@ export function PlannedClient({
             fontSize: 13
           },
           labelLine: { show: false },
-          data: data.length > 0 ? data : [{ value: 1, name: 'Sem dados', itemStyle: { color: '#e2e8f0' } }]
+          data: data.length > 0 ? data : [{ value: 1, name: hiddenExpenseCategoryIds.length > 0 ? 'Fatias ocultadas' : 'Sem dados', itemStyle: { color: '#e2e8f0' } }]
         }
       ]
     }
-  }, [categoryLegendData])
+  }, [categoryLegendData, hiddenExpenseCategoryIds])
+
+  // Chart Options - ECharts Donut Chart (Distribuição por Categoria de Entradas com Filtro de Ocultação)
+  const incomeDonutChartOption = useMemo(() => {
+    const visibleLegend = incomeLegendData.filter(item => !hiddenIncomeCategoryIds.includes(item.id))
+    const data = visibleLegend.map(item => ({
+      name: `${item.icon} ${item.name}`,
+      value: item.value,
+      icon: item.icon,
+      itemStyle: { color: item.color }
+    }))
+
+    return {
+      tooltip: {
+        trigger: 'item',
+        confiner: true,
+        hideDelay: 2000,
+        extraCssText: 'z-index: 100; border-radius: 12px; box-shadow: 0 10px 25px -5px rgba(0,0,0,0.1); border: 1px solid #e2e8f0;',
+        position: function (point: number[], params: any, dom: any, rect: any, size: any) {
+          let x = point[0] + 15
+          let y = point[1] - (size.contentSize[1] / 2)
+          if (x + size.contentSize[0] > size.viewSize[0]) {
+            x = point[0] - size.contentSize[0] - 15
+          }
+          if (x < 10) x = 10
+          if (y < 10) y = 10
+          return [x, y]
+        },
+        formatter: (params: any) => `<strong>${params.name}</strong><br/>${currencyFmt.format(params.value)} (${params.percent}%)`
+      },
+      legend: { show: false },
+      series: [
+        {
+          name: 'Entradas',
+          type: 'pie',
+          radius: ['48%', '78%'],
+          center: ['50%', '50%'],
+          minAngle: 3,
+          avoidLabelOverlap: false,
+          itemStyle: {
+            borderRadius: 6,
+            borderColor: '#fff',
+            borderWidth: 1
+          },
+          label: {
+            show: true,
+            position: 'inside',
+            formatter: (params: any) => (params.percent >= 5 ? (params.data.icon || '') : ''),
+            fontSize: 13
+          },
+          labelLine: { show: false },
+          data: data.length > 0 ? data : [{ value: 1, name: hiddenIncomeCategoryIds.length > 0 ? 'Fatias ocultadas' : 'Sem dados', itemStyle: { color: '#e2e8f0' } }]
+        }
+      ]
+    }
+  }, [incomeLegendData, hiddenIncomeCategoryIds])
 
   // Chart Options - ECharts Bar Chart (Planejado vs Realizado)
   const barChartOption = useMemo(() => {
@@ -1035,8 +1196,34 @@ export function PlannedClient({
           </button>
         </div>
 
-        {/* Linha de Controles Mobile: Virada + Mês + Botão Adicionar */}
+        {/* Linha de Controles Mobile & Desktop: Seletor de Visão (Planejado vs Realizado) + Virada + Mês + Botão Adicionar */}
         <div className="flex flex-wrap sm:flex-nowrap items-center gap-2 justify-between w-full">
+          {/* Seletor de Visão Global da Tela: Orçamento Planejado vs Efetivado no Mês */}
+          <div className="flex items-center bg-slate-100 p-1 rounded-xl text-xs font-bold border border-slate-200/80 shadow-xs">
+            <button
+              onClick={() => setDataMode('planned')}
+              className={`px-2.5 sm:px-3.5 py-1.5 rounded-lg transition-all flex items-center gap-1.5 ${
+                dataMode === 'planned'
+                  ? 'bg-white text-emerald-700 shadow-xs font-extrabold'
+                  : 'text-slate-500 hover:text-slate-800'
+              }`}
+              title="Exibir os orçamentos, metas e projeção total do ciclo"
+            >
+              <span>🎯 Planejado</span>
+            </button>
+            <button
+              onClick={() => setDataMode('realized')}
+              className={`px-2.5 sm:px-3.5 py-1.5 rounded-lg transition-all flex items-center gap-1.5 ${
+                dataMode === 'realized'
+                  ? 'bg-white text-indigo-700 shadow-xs font-extrabold'
+                  : 'text-slate-500 hover:text-slate-800'
+              }`}
+              title="Exibir estritamente os valores já pagos e efetuados no mês"
+            >
+              <span>⚡ Realizado</span>
+            </button>
+          </div>
+
           {/* Botão de Ajuste do Dia da Virada */}
           <button
             onClick={() => {
@@ -1137,16 +1324,20 @@ export function PlannedClient({
         >
           <div>
             <div className="flex justify-between items-center mb-1 sm:mb-2">
-              <span className="text-[10px] sm:text-xs font-bold uppercase tracking-wider text-slate-400 truncate">Receita</span>
+              <span className="text-[10px] sm:text-xs font-bold uppercase tracking-wider text-slate-400 truncate">
+                {dataMode === 'planned' ? 'Receita Prevista' : 'Receita Efetivada'}
+              </span>
               <ArrowUpRight className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-emerald-500 shrink-0 group-hover:translate-x-0.5 transition-transform" />
             </div>
             <div className="text-base sm:text-2xl font-black text-slate-800 truncate tabular-nums">
-              {currencyFmt.format(metrics.confirmedIncome)}
+              {currencyFmt.format(dataMode === 'planned' ? metrics.plannedIncome : metrics.confirmedIncome)}
             </div>
           </div>
           <div className="mt-2 sm:mt-4 pt-2 border-t border-slate-100 text-[10px] sm:text-xs text-slate-500 flex justify-between items-center">
-            <span>Previsto:</span>
-            <strong className="text-slate-700 font-bold tabular-nums">{currencyFmt.format(metrics.plannedIncome)}</strong>
+            <span>{dataMode === 'planned' ? 'Confirmado:' : 'Orçado Previsto:'}</span>
+            <strong className="text-slate-700 font-bold tabular-nums">
+              {currencyFmt.format(dataMode === 'planned' ? metrics.confirmedIncome : metrics.plannedIncome)}
+            </strong>
           </div>
         </div>
 
@@ -1157,16 +1348,20 @@ export function PlannedClient({
         >
           <div>
             <div className="flex justify-between items-center mb-1 sm:mb-2">
-              <span className="text-[10px] sm:text-xs font-bold uppercase tracking-wider text-slate-400 truncate">Custos Fixos</span>
+              <span className="text-[10px] sm:text-xs font-bold uppercase tracking-wider text-slate-400 truncate">
+                {dataMode === 'planned' ? 'Fixos Planejados' : 'Fixos Quitados'}
+              </span>
               <ArrowDownRight className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-rose-500 shrink-0 group-hover:translate-y-0.5 transition-transform" />
             </div>
             <div className="text-base sm:text-2xl font-black text-slate-800 truncate tabular-nums">
-              {currencyFmt.format(metrics.confirmedFixed)}
+              {currencyFmt.format(dataMode === 'planned' ? metrics.plannedFixed : metrics.confirmedFixed)}
             </div>
           </div>
           <div className="mt-2 sm:mt-4 pt-2 border-t border-slate-100 text-[10px] sm:text-xs text-slate-500 flex justify-between items-center">
-            <span>Previsto:</span>
-            <strong className="text-slate-700 font-bold tabular-nums">{currencyFmt.format(metrics.plannedFixed)}</strong>
+            <span>{dataMode === 'planned' ? 'Quitado Hoje:' : 'Teto Orçado:'}</span>
+            <strong className="text-slate-700 font-bold tabular-nums">
+              {currencyFmt.format(dataMode === 'planned' ? metrics.confirmedFixed : metrics.plannedFixed)}
+            </strong>
           </div>
         </div>
 
@@ -1177,16 +1372,20 @@ export function PlannedClient({
         >
           <div>
             <div className="flex justify-between items-center mb-1 sm:mb-2">
-              <span className="text-[10px] sm:text-xs font-bold uppercase tracking-wider text-slate-400 truncate">Custos Variáveis</span>
+              <span className="text-[10px] sm:text-xs font-bold uppercase tracking-wider text-slate-400 truncate">
+                {dataMode === 'planned' ? 'Variáveis Previstos' : 'Variáveis Efetivados'}
+              </span>
               <Layers className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-amber-500 shrink-0 group-hover:scale-110 transition-transform" />
             </div>
             <div className="text-base sm:text-2xl font-black text-slate-800 truncate tabular-nums">
-              {currencyFmt.format(metrics.confirmedVariable)}
+              {currencyFmt.format(dataMode === 'planned' ? metrics.plannedVariable : metrics.confirmedVariable)}
             </div>
           </div>
           <div className="mt-2 sm:mt-4 pt-2 border-t border-slate-100 text-[10px] sm:text-xs text-slate-500 flex justify-between items-center">
-            <span>Previsto:</span>
-            <strong className="text-slate-700 font-bold tabular-nums">{currencyFmt.format(metrics.plannedVariable)}</strong>
+            <span>{dataMode === 'planned' ? 'Pago Hoje:' : 'Teto Orçado:'}</span>
+            <strong className="text-slate-700 font-bold tabular-nums">
+              {currencyFmt.format(dataMode === 'planned' ? metrics.confirmedVariable : metrics.plannedVariable)}
+            </strong>
           </div>
         </div>
 
@@ -1197,16 +1396,20 @@ export function PlannedClient({
         >
           <div>
             <div className="flex justify-between items-center mb-1 sm:mb-2">
-              <span className="text-[10px] sm:text-xs font-bold uppercase tracking-wider text-slate-400 truncate">Investimentos</span>
+              <span className="text-[10px] sm:text-xs font-bold uppercase tracking-wider text-slate-400 truncate">
+                {dataMode === 'planned' ? 'Meta Aportes' : 'Aportado Realizado'}
+              </span>
               <PiggyBank className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-purple-600 shrink-0 group-hover:scale-110 transition-transform" />
             </div>
             <div className="text-base sm:text-2xl font-black text-purple-700 truncate tabular-nums">
-              {currencyFmt.format(metrics.confirmedInvestments)}
+              {currencyFmt.format(dataMode === 'planned' ? metrics.plannedInvestments : metrics.confirmedInvestments)}
             </div>
           </div>
           <div className="mt-2 sm:mt-4 pt-2 border-t border-slate-100 text-[10px] sm:text-xs text-slate-500 flex justify-between items-center">
-            <span>Meta Mensal:</span>
-            <strong className="text-purple-900 font-bold tabular-nums">{currencyFmt.format(metrics.plannedInvestments)}</strong>
+            <span>{dataMode === 'planned' ? 'Realizado:' : 'Meta Planejada:'}</span>
+            <strong className="text-purple-900 font-bold tabular-nums">
+              {currencyFmt.format(dataMode === 'planned' ? metrics.confirmedInvestments : metrics.plannedInvestments)}
+            </strong>
           </div>
         </div>
       </motion.div>
@@ -1219,31 +1422,39 @@ export function PlannedClient({
           </div>
           <div>
             <div className="flex items-center gap-2 mb-0.5">
-              <h3 className="text-xs sm:text-sm font-extrabold text-slate-900">Saldo Livre Previsto</h3>
+              <h3 className="text-xs sm:text-sm font-extrabold text-slate-900">
+                {dataMode === 'planned' ? 'Saldo Livre Previsto' : 'Saldo Livre Efetivado'}
+              </h3>
               <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-700 bg-emerald-100/90 px-2 py-0.5 rounded-md">
-                Projeção do Ciclo
+                {dataMode === 'planned' ? 'Projeção do Ciclo' : 'Balanço Ocorrido no Mês'}
               </span>
             </div>
             <p className="text-[11px] sm:text-xs text-slate-500 max-w-sm">
-              Sobram após receber salário, quitar contas e realizar aportes.
+              {dataMode === 'planned'
+                ? 'Sobram após receber salário, quitar contas e realizar aportes.'
+                : 'Sobram considerando estritamente as entradas efetuadas e contas pagas no mês.'}
             </p>
           </div>
         </div>
 
         <div className="flex items-center justify-between md:justify-end gap-6 pt-3 md:pt-0 border-t md:border-t-0 border-emerald-100">
           <div className="text-left md:text-right">
-            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Confirmado Hoje</span>
-            <span className={`text-xs sm:text-sm font-black tabular-nums ${metrics.remainingBalanceConfirmed >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
-              {currencyFmt.format(metrics.remainingBalanceConfirmed)}
+            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">
+              {dataMode === 'planned' ? 'Confirmado Hoje' : 'Estimativa Projeção Total'}
+            </span>
+            <span className={`text-xs sm:text-sm font-black tabular-nums ${(dataMode === 'planned' ? metrics.remainingBalanceConfirmed : metrics.remainingBalancePlanned) >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
+              {currencyFmt.format(dataMode === 'planned' ? metrics.remainingBalanceConfirmed : metrics.remainingBalancePlanned)}
             </span>
           </div>
 
           <div className="h-7 w-[1px] bg-slate-200/80 hidden md:block" />
 
           <div className="text-right">
-            <span className="text-[10px] font-bold text-emerald-700 uppercase tracking-wider block">Sobra Estimada</span>
-            <span className={`text-lg sm:text-2xl font-black tabular-nums ${metrics.remainingBalancePlanned >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
-              {currencyFmt.format(metrics.remainingBalancePlanned)}
+            <span className="text-[10px] font-bold text-emerald-700 uppercase tracking-wider block">
+              {dataMode === 'planned' ? 'Sobra Estimada' : 'Saldo Efetivado Hoje'}
+            </span>
+            <span className={`text-lg sm:text-2xl font-black tabular-nums ${(dataMode === 'planned' ? metrics.remainingBalancePlanned : metrics.remainingBalanceConfirmed) >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
+              {currencyFmt.format(dataMode === 'planned' ? metrics.remainingBalancePlanned : metrics.remainingBalanceConfirmed)}
             </span>
           </div>
         </div>
@@ -1293,14 +1504,16 @@ export function PlannedClient({
 
           {/* Linha 1 de Gráficos: 1. Top Gastos & 2. Distribuição por Categoria */}
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 sm:gap-6">
-            {/* Gráfico 1: Top 5 Maiores Gastos (Left 6 cols) */}
+            {/* Gráfico 1: Top 5 Maiores Gastos / Entradas (Left 6 cols) */}
             <div className="lg:col-span-6 glass-panel p-4 sm:p-6 rounded-2xl flex flex-col gap-3 overflow-hidden">
               <div>
                 <h3 className="font-black text-slate-800 text-base sm:text-lg flex items-center gap-2">
-                  <span className="text-indigo-500">🏆</span>
-                  Top 5 Maiores Gastos do Ciclo
+                  <span className={distributionTab === 'expense' ? 'text-indigo-500' : 'text-emerald-500'}>🏆</span>
+                  {distributionTab === 'expense' ? 'Top 5 Maiores Gastos do Ciclo' : 'Top 5 Maiores Entradas do Ciclo'}
                 </h3>
-                <p className="text-[11px] sm:text-xs text-slate-500">Categorias que mais consumiram recursos no mês</p>
+                <p className="text-[11px] sm:text-xs text-slate-500">
+                  {distributionTab === 'expense' ? 'Categorias que mais consumiram recursos no mês' : 'Fontes que mais geraram receitas no mês'}
+                </p>
               </div>
               <div className="h-72 sm:h-80 w-full pt-2">
                 <ReactECharts notMerge={true} lazyUpdate={true} option={topCategoriesChartOption} style={{ height: '100%', width: '100%' }} />
@@ -1309,39 +1522,123 @@ export function PlannedClient({
 
             {/* Gráfico 2: Distribuição Donut Chart + Legenda (Right 6 cols) */}
             <div className="lg:col-span-6 glass-panel p-4 sm:p-6 rounded-2xl flex flex-col gap-3 overflow-hidden">
-              <div>
-                <h3 className="font-black text-slate-800 text-base sm:text-lg flex items-center gap-2">
-                  <PieIcon className="w-4 h-4 sm:w-5 sm:h-5 text-purple-600" />
-                  Distribuição por Categoria
-                </h3>
-                <p className="text-[11px] sm:text-xs text-slate-500">Divisão dos recursos gastos no mês</p>
+              <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
+                <div>
+                  <h3 className="font-black text-slate-800 text-base sm:text-lg flex items-center gap-2">
+                    <PieIcon className="w-4 h-4 sm:w-5 sm:h-5 text-purple-600" />
+                    {distributionTab === 'expense' ? 'Distribuição de Gastos' : 'Distribuição de Entradas'}
+                  </h3>
+                  <p className="text-[11px] sm:text-xs text-slate-500">
+                    {distributionTab === 'expense' ? 'Clique no ícone de olho para oculta/exibir fatia' : 'Origem das receitas confirmadas no mês'}
+                  </p>
+                </div>
+
+                <div className="flex bg-slate-100 p-1 rounded-xl text-xs font-bold shrink-0 self-stretch sm:self-auto">
+                  <button
+                    onClick={() => setDistributionTab('expense')}
+                    className={`flex-1 sm:flex-none px-2.5 py-1 rounded-lg transition-all flex items-center justify-center gap-1 ${
+                      distributionTab === 'expense' ? 'bg-white text-rose-600 shadow-xs font-extrabold' : 'text-slate-500 hover:text-slate-800'
+                    }`}
+                  >
+                    <span>💸 Gastos</span>
+                  </button>
+                  <button
+                    onClick={() => setDistributionTab('income')}
+                    className={`flex-1 sm:flex-none px-2.5 py-1 rounded-lg transition-all flex items-center justify-center gap-1 ${
+                      distributionTab === 'income' ? 'bg-white text-emerald-600 shadow-xs font-extrabold' : 'text-slate-500 hover:text-slate-800'
+                    }`}
+                  >
+                    <span>💰 Entradas</span>
+                  </button>
+                </div>
               </div>
+
               <div className="h-56 sm:h-64 w-full pt-1">
-                <ReactECharts notMerge={true} lazyUpdate={true} option={donutChartOption} style={{ height: '100%', width: '100%' }} />
+                <ReactECharts
+                  notMerge={true}
+                  lazyUpdate={true}
+                  option={distributionTab === 'expense' ? donutChartOption : incomeDonutChartOption}
+                  style={{ height: '100%', width: '100%' }}
+                />
               </div>
+
+              {/* Botão de Restaurar Slices caso existam fatias ocultas */}
+              {((distributionTab === 'expense' && hiddenExpenseCategoryIds.length > 0) ||
+                (distributionTab === 'income' && hiddenIncomeCategoryIds.length > 0)) && (
+                <div className="flex justify-between items-center text-xs px-1 text-slate-500 bg-amber-50/60 p-1.5 rounded-xl border border-amber-200/50">
+                  <span className="text-[11px] font-bold text-amber-700">
+                    ⚠️ {distributionTab === 'expense' ? hiddenExpenseCategoryIds.length : hiddenIncomeCategoryIds.length} fatia(s) oculta(s) no gráfico
+                  </span>
+                  <button
+                    onClick={() => {
+                      if (distributionTab === 'expense') setHiddenExpenseCategoryIds([])
+                      else setHiddenIncomeCategoryIds([])
+                    }}
+                    className="text-[11px] font-bold text-indigo-600 hover:underline flex items-center gap-1"
+                  >
+                    Mostrar todas
+                  </button>
+                </div>
+              )}
 
               {/* Lista Detalhada de Categorias */}
               <div className="flex flex-col gap-1 pt-2 border-t border-slate-100 max-h-48 overflow-y-auto pr-0.5">
-                {categoryLegendData.map(item => (
-                  <div
-                    key={item.id}
-                    onClick={() => setViewCategoryDetail(categories.find(c => c.id === item.id) || null)}
-                    className="flex items-center justify-between gap-2 p-1.5 rounded-xl hover:bg-slate-50 border border-transparent hover:border-slate-200/60 cursor-pointer transition-all group"
-                  >
-                    <div className="flex items-center gap-2 min-w-0 flex-1">
-                      <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: item.color }} />
-                      <span className="text-xs font-bold text-slate-800 flex items-center gap-1">
-                        <span>{item.icon}</span>
-                        <span>{item.name}</span>
-                      </span>
-                    </div>
+                {(distributionTab === 'expense' ? categoryLegendData : incomeLegendData).map(item => {
+                  const isHidden = distributionTab === 'expense'
+                    ? hiddenExpenseCategoryIds.includes(item.id)
+                    : hiddenIncomeCategoryIds.includes(item.id)
 
-                    <div className="flex items-center gap-2 shrink-0">
-                      <span className="text-xs font-black tabular-nums text-slate-800">{currencyFmt.format(item.value)}</span>
-                      <span className="text-[10px] font-bold text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded-md w-9 text-center">{item.percent}%</span>
+                  return (
+                    <div
+                      key={item.id}
+                      className={`flex items-center justify-between gap-2 p-1.5 rounded-xl border border-transparent transition-all group ${
+                        isHidden ? 'opacity-40 bg-slate-50/50' : 'hover:bg-slate-50 hover:border-slate-200/60'
+                      }`}
+                    >
+                      {/* Clique no nome da categoria abre o modal detalhado! */}
+                      <div
+                        onClick={() => setViewCategoryDetail(categories.find(c => c.id === item.id) || null)}
+                        className="flex items-center gap-2 min-w-0 flex-1 cursor-pointer"
+                        title="Clique para ver lançamentos detalhados desta categoria"
+                      >
+                        <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: item.color }} />
+                        <span className={`text-xs font-bold flex items-center gap-1 ${isHidden ? 'line-through text-slate-400' : 'text-slate-800 group-hover:text-indigo-600 transition-colors'}`}>
+                          <span>{item.icon}</span>
+                          <span>{item.name}</span>
+                        </span>
+                      </div>
+
+                      {/* Valor + Porcentagem + Olho para Ocultar/Exibir fatia no gráfico */}
+                      <div className="flex items-center gap-2 shrink-0">
+                        <span
+                          onClick={() => {
+                            if (distributionTab === 'expense') toggleHiddenExpenseCategory(item.id)
+                            else toggleHiddenIncomeCategory(item.id)
+                          }}
+                          className={`text-xs font-black tabular-nums cursor-pointer ${isHidden ? 'line-through text-slate-400' : 'text-slate-800'}`}
+                          title={isHidden ? "Exibir fatia no gráfico" : "Ocultar fatia do gráfico"}
+                        >
+                          {currencyFmt.format(item.value)}
+                        </span>
+                        <span className="text-[10px] font-bold text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded-md w-9 text-center">
+                          {item.percent}%
+                        </span>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            if (distributionTab === 'expense') toggleHiddenExpenseCategory(item.id)
+                            else toggleHiddenIncomeCategory(item.id)
+                          }}
+                          className="p-1 rounded-lg hover:bg-slate-200/70 text-slate-400 hover:text-slate-600 transition-colors"
+                          title={isHidden ? "Exibir no gráfico" : "Ocultar do gráfico"}
+                        >
+                          {isHidden ? <EyeOff className="w-3.5 h-3.5 text-slate-400" /> : <Eye className="w-3.5 h-3.5 text-emerald-600" />}
+                        </button>
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  )
+                })}
               </div>
             </div>
           </div>

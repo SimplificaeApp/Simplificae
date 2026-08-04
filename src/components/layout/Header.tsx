@@ -7,6 +7,7 @@ import { useTransition, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import Link from "next/link";
 import { toast } from "sonner";
+import { useIsFetching, useQueryClient } from "@tanstack/react-query";
 
 import { useSync } from "@/components/providers/SyncProvider";
 
@@ -35,6 +36,10 @@ export function Header({ workspaces = [], user }: { workspaces?: any[], user?: a
   const [isPending, startTransition] = useTransition();
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  
+  const queryClient = useQueryClient();
+  const isFetching = useIsFetching();
+
   const firstName = user?.user_metadata?.first_name || user?.email?.split('@')[0] || 'Usuário';
   const initials = firstName.slice(0, 2).toUpperCase();
 
@@ -44,9 +49,17 @@ export function Header({ workspaces = [], user }: { workspaces?: any[], user?: a
 
   const handleRefreshApp = async () => {
     setIsRefreshing(true);
-    toast.info("Limpando cache e recarregando o aplicativo...");
+    toast.info("Limpando cache e sincronizando dados...");
     try {
+      // 1. Limpar cache em memória do TanStack Query
+      queryClient.clear();
+      
       if (typeof window !== 'undefined') {
+        // 2. Limpar cache persistido no localStorage e sessionStorage
+        localStorage.removeItem('FINANCE_APP_QUERY_CACHE');
+        sessionStorage.clear();
+
+        // 3. Desregistrar Service Workers e limpar CacheStorage
         if ('serviceWorker' in navigator) {
           const registrations = await navigator.serviceWorker.getRegistrations();
           for (const reg of registrations) {
@@ -62,16 +75,25 @@ export function Header({ workspaces = [], user }: { workspaces?: any[], user?: a
       console.error("Erro ao limpar cache:", err);
     }
     setTimeout(() => {
-      window.location.reload();
-    }, 600);
+      window.location.href = window.location.pathname + '?refresh=' + Date.now();
+    }, 400);
   };
 
   const pageKey = Object.keys(PAGE_LABELS).find(k => k !== '/' && pathname.startsWith(k)) || (pathname === '/' ? '/' : null);
   const page = pageKey ? PAGE_LABELS[pageKey] : PAGE_LABELS['/'];
   const PageIcon = page.icon;
 
+  const showSyncingBar = isOnline && (isFetching > 0 || isRefreshing);
+
   return (
     <>
+      {/* Barrinha de Progresso / Sincronização em Segundo Plano no Topo */}
+      {showSyncingBar && (
+        <div className="fixed top-0 left-0 right-0 h-[2.5px] z-50 overflow-hidden bg-emerald-100/50">
+          <div className="h-full bg-gradient-to-r from-emerald-500 via-teal-400 to-indigo-500 animate-pulse w-full" />
+        </div>
+      )}
+
       <header className="h-14 border-b border-slate-200/80 bg-white/90 backdrop-blur-sm flex items-center justify-between px-4 sm:px-5 sticky top-0 z-20 shrink-0">
         {/* Breadcrumb / Page title */}
         <div className="flex items-center gap-2.5">
@@ -89,16 +111,16 @@ export function Header({ workspaces = [], user }: { workspaces?: any[], user?: a
 
         {/* User area */}
         <div className="flex items-center gap-2.5 sm:gap-3">
-          {/* Botão Recarregar / Limpar Cache - Apenas quando Online */}
+          {/* Botão Recarregar / Sincronizar Cache - Apenas quando Online */}
           {isOnline && (
             <button
               onClick={handleRefreshApp}
               disabled={isRefreshing}
               className="flex items-center gap-1.5 text-xs font-semibold text-slate-600 hover:text-emerald-600 transition-colors bg-slate-100/90 hover:bg-emerald-50 border border-slate-200/60 px-2.5 py-1.5 rounded-lg disabled:opacity-50"
-              title="Recarregar aplicativo e limpar cache"
+              title="Recarregar aplicativo e forçar sincronização com o banco"
             >
-              <RefreshCw className={`w-3.5 h-3.5 ${isRefreshing ? 'animate-spin text-emerald-600' : ''}`} />
-              <span className="hidden sm:inline">Atualizar</span>
+              <RefreshCw className={`w-3.5 h-3.5 ${isFetching > 0 || isRefreshing ? 'animate-spin text-emerald-600' : ''}`} />
+              <span className="hidden sm:inline">{isFetching > 0 ? 'Sincronizando...' : 'Atualizar'}</span>
             </button>
           )}
 
