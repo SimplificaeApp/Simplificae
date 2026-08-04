@@ -137,6 +137,22 @@ export function calculateCardBalances(card: any, transactions: any[]) {
       }
     }
     
+    // Estornos / Créditos no cartão (account_id = card.id && type = 'income')
+    if (tx.account_id === card.id && tx.type === 'income') {
+      totalBalance -= Number(tx.amount)
+      
+      if (txDate >= cycles.current.start && txDate <= cycles.current.end) {
+        currentInvoiceTotal -= Number(tx.amount)
+        currentTxs.push(tx)
+      } else if (txDate >= cycles.previous.start && txDate <= cycles.previous.end) {
+        previousInvoiceTotal -= Number(tx.amount)
+        previousTxs.push(tx)
+      } else if (txDate >= cycles.next.start && txDate <= cycles.next.end) {
+        nextInvoiceTotal -= Number(tx.amount)
+        nextTxs.push(tx)
+      }
+    }
+
     // Pagamentos do cartão (transferência PARA o cartão)
     if (tx.destination_account_id === card.id && tx.type === 'transfer') {
       totalBalance -= Number(tx.amount)
@@ -192,6 +208,9 @@ export function getInvoiceForOffset(card: any, transactions: any[], offsetMonths
     if (txDate >= cycle.start && txDate <= cycle.end) {
       if (tx.account_id === card.id && tx.type === 'expense') {
         total += Number(tx.amount)
+        txs.push(tx)
+      } else if (tx.account_id === card.id && tx.type === 'income') {
+        total -= Number(tx.amount)
         txs.push(tx)
       } else if (tx.destination_account_id === card.id && tx.type === 'transfer') {
         total -= Number(tx.amount)

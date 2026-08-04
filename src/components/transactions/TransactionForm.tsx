@@ -443,7 +443,28 @@ export function TransactionForm({
       )}
 
       {/* Tabs Type Selector */}
-      {!isCreditCard && (
+      {isCreditCard ? (
+        <div className="flex bg-slate-100/80 p-1 rounded-2xl border border-slate-200/60 shadow-inner">
+          <button
+            type="button"
+            onClick={() => setType('expense')}
+            className={`flex-1 flex items-center justify-center gap-1.5 py-2 text-xs sm:text-sm font-bold rounded-xl transition-all ${
+              isExpense ? 'bg-white text-rose-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'
+            }`}
+          >
+            <TrendingDown className="w-4 h-4" /> Despesa
+          </button>
+          <button
+            type="button"
+            onClick={() => setType('income')}
+            className={`flex-1 flex items-center justify-center gap-1.5 py-2 text-xs sm:text-sm font-bold rounded-xl transition-all ${
+              type === 'income' ? 'bg-white text-emerald-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'
+            }`}
+          >
+            <TrendingUp className="w-4 h-4" /> Estorno / Crédito
+          </button>
+        </div>
+      ) : (
         <div className="flex bg-slate-100/80 p-1 rounded-2xl border border-slate-200/60 shadow-inner">
           <button
             type="button"
@@ -480,7 +501,7 @@ export function TransactionForm({
       {/* Valor Input Hero (NUMERIC KEYPAD FOR MOBILE!) */}
       <div className={`flex flex-col items-center justify-center py-4 px-6 rounded-2xl bg-gradient-to-b ${themeBg} border shadow-sm`}>
         <label className="text-xs font-bold uppercase tracking-wider text-slate-400 mb-1">
-          {isExpense ? 'Valor da Despesa' : isTransfer ? 'Valor da Transferência' : 'Valor da Receita'}
+          {isExpense ? 'Valor da Despesa' : isCreditCard ? 'Valor do Estorno / Crédito' : isTransfer ? 'Valor da Transferência' : 'Valor da Receita'}
         </label>
         <div className="flex items-center text-3xl sm:text-4xl font-black text-slate-900">
           <span className="text-xl sm:text-2xl text-slate-400 mr-1.5 font-bold">R$</span>

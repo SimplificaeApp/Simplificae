@@ -36,7 +36,7 @@ export function CreditCardsClient({
   const { data: cachedTransactions } = useTransactionsQuery(initialTransactions)
   const allTransactions = cachedTransactions || initialTransactions
   const ccIds = new Set(creditCards.map(c => c.id))
-  const transactions = allTransactions.filter(t => ccIds.has(t.account_id))
+  const transactions = allTransactions.filter(t => ccIds.has(t.account_id) || (t.destination_account_id && ccIds.has(t.destination_account_id)))
 
   const { data: cachedCategories } = useCategoriesQuery(initialCategories)
   const categories = cachedCategories || initialCategories
@@ -51,6 +51,10 @@ export function CreditCardsClient({
   
   const [editingCard, setEditingCard] = useState<any>(null)
   const [selectedCard, setSelectedCard] = useState<any>(null)
+  const selectedCardCalc = useMemo(() => {
+    if (!selectedCard) return null
+    return calculateCardBalances(selectedCard, transactions)
+  }, [selectedCard, transactions])
   const [editingTx, setEditingTx] = useState<any>(null)
   const [isEditTransactionOpen, setIsEditTransactionOpen] = useState(false)
   const [barChartOffset, setBarChartOffset] = useState(0)
@@ -478,10 +482,10 @@ export function CreditCardsClient({
           <div className="flex flex-col gap-3">
             <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl mb-2">
               <p className="text-sm text-slate-500 font-medium mb-1">Fatura Atual (estimativa)</p>
-              <h2 className="text-3xl font-black text-slate-800">R$ {selectedCard.calc?.totals.current.toLocaleString('pt-BR', { minimumFractionDigits: 2 }) || '0,00'}</h2>
+              <h2 className="text-3xl font-black text-slate-800">R$ {(selectedCardCalc?.totals.current ?? 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</h2>
               <div className="flex justify-between text-xs text-slate-400 mt-2">
                 <span>Limite: R$ {Number(selectedCard.credit_limit || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
-                <span>Disponível: R$ {Math.max(0, Number(selectedCard.credit_limit || 0) - (selectedCard.calc?.totals.totalDebt || 0)).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
+                <span>Disponível: R$ {Math.max(0, Number(selectedCard.credit_limit || 0) - (selectedCardCalc?.totals.totalDebt || 0)).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
               </div>
             </div>
 
@@ -493,8 +497,8 @@ export function CreditCardsClient({
                 <PlusCircle className="w-5 h-5" />
               </div>
               <div>
-                <h4 className="font-bold text-slate-800">Adicionar Despesa</h4>
-                <p className="text-xs text-slate-500">Lançar compra neste cartão</p>
+                <h4 className="font-bold text-slate-800">Adicionar Lançamento</h4>
+                <p className="text-xs text-slate-500">Lançar compra ou estorno neste cartão</p>
               </div>
             </button>
 
@@ -530,7 +534,7 @@ export function CreditCardsClient({
       <Modal
         isOpen={isTransactionOpen}
         onClose={() => setIsTransactionOpen(false)}
-        title="Nova Despesa no Cartão"
+        title="Novo Lançamento no Cartão"
       >
         <TransactionForm 
           workspaceId={workspaceId}
@@ -574,7 +578,7 @@ export function CreditCardsClient({
       <Modal
         isOpen={isEditTransactionOpen}
         onClose={() => setIsEditTransactionOpen(false)}
-        title="Editar Despesa do Cartão"
+        title="Editar Lançamento do Cartão"
       >
         <TransactionForm 
           workspaceId={workspaceId}

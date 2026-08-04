@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { ChevronLeft, ChevronRight, ShoppingBag, ArrowRightLeft } from 'lucide-react'
+import { ChevronLeft, ChevronRight, ShoppingBag, ArrowRightLeft, TrendingUp } from 'lucide-react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { getInvoiceForOffset } from '@/lib/creditCardUtils'
 
@@ -28,6 +28,7 @@ export function InvoiceTimelineModal({ card, transactions, onEditTransaction }: 
 
   const getTxIcon = (tx: any) => {
     if (tx.type === 'transfer') return <ArrowRightLeft className="w-4 h-4" />
+    if (tx.type === 'income') return <TrendingUp className="w-4 h-4" />
     if (tx.category?.icon) return <span className="text-sm">{tx.category.icon}</span>
     return <ShoppingBag className="w-4 h-4" />
   }
@@ -89,7 +90,7 @@ export function InvoiceTimelineModal({ card, transactions, onEditTransaction }: 
                   <div className="flex items-center gap-3 min-w-0 flex-1">
                     <div 
                       className="w-8 h-8 rounded-full flex items-center justify-center text-white shadow-sm shrink-0"
-                      style={{ backgroundColor: tx.type === 'transfer' ? '#10b981' : (tx.category?.color || '#94a3b8') }}
+                      style={{ backgroundColor: (tx.type === 'transfer' || tx.type === 'income') ? '#10b981' : (tx.category?.color || '#94a3b8') }}
                     >
                       {getTxIcon(tx)}
                     </div>
@@ -97,12 +98,12 @@ export function InvoiceTimelineModal({ card, transactions, onEditTransaction }: 
                       <p className="text-sm font-bold text-slate-700 truncate">{tx.description}</p>
                       <p className="text-[10px] text-slate-400 font-medium truncate">
                         {new Intl.DateTimeFormat('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' }).format(new Date(tx.date + 'T12:00:00'))}
-                        {tx.type === 'transfer' && ' • Pagamento'}
+                        {tx.type === 'transfer' ? ' • Pagamento' : tx.type === 'income' ? ' • Estorno/Crédito' : ''}
                       </p>
                     </div>
                   </div>
-                  <span className={`text-sm font-bold ml-2 shrink-0 ${tx.type === 'transfer' ? 'text-emerald-600' : 'text-slate-700'}`}>
-                    {tx.type === 'transfer' ? '+' : '-'} R$ {Number(tx.amount).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                  <span className={`text-sm font-bold ml-2 shrink-0 ${(tx.type === 'transfer' || tx.type === 'income') ? 'text-emerald-600' : 'text-slate-700'}`}>
+                    {(tx.type === 'transfer' || tx.type === 'income') ? '+' : '-'} R$ {Number(tx.amount).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                   </span>
                 </div>
               ))}
