@@ -315,13 +315,23 @@ export function DashboardClient({
 
   // KPIs (Only Current Month)
   const totalIncomes = useMemo(
-    () => currentMonthTx.filter((t) => t.type === "income").reduce((acc, t) => acc + Number(t.amount), 0),
-    [currentMonthTx]
+    () => currentMonthTx.filter((t) => {
+      if (t.type !== "income") return false;
+      const acc = t.account_id ? accountsMap[t.account_id] : ((t as any).account || null);
+      return !acc || acc.type !== 'credit_card';
+    }).reduce((acc, t) => acc + Number(t.amount), 0),
+    [currentMonthTx, accountsMap]
   );
 
   const totalExpenses = useMemo(
-    () => currentMonthTx.filter((t) => t.type === "expense").reduce((acc, t) => acc + Number(t.amount), 0),
-    [currentMonthTx]
+    () => currentMonthTx.reduce((acc, t) => {
+      const accObj = t.account_id ? accountsMap[t.account_id] : ((t as any).account || null);
+      const isCC = Boolean(accObj && accObj.type === 'credit_card');
+      if (t.type === 'expense') return acc + Number(t.amount);
+      if (isCC && t.type === 'income') return acc - Number(t.amount);
+      return acc;
+    }, 0),
+    [currentMonthTx, accountsMap]
   );
   const availableBalance = useMemo(
     () => {
@@ -378,7 +388,12 @@ export function DashboardClient({
     currentMonthTx.forEach((t) => {
       const day = new Date(t.date + 'T12:00:00').getDate();
       if (days[day]) {
-        if (t.type === "income") days[day].income += Number(t.amount);
+        const acc = t.account_id ? accountsMap[t.account_id] : ((t as any).account || null);
+        const isCC = Boolean(acc && acc.type === 'credit_card');
+        if (t.type === "income") {
+          if (!isCC) days[day].income += Number(t.amount);
+          else days[day].expense -= Number(t.amount);
+        }
         if (t.type === "expense") days[day].expense += Number(t.amount);
       }
     });
@@ -388,7 +403,7 @@ export function DashboardClient({
       Receitas: v.income,
       Despesas: v.expense,
     }));
-  }, [currentMonthTx, cyclePeriod]);
+  }, [currentMonthTx, cyclePeriod, accountsMap]);
 
   // Donut data: top categories by expense amount (Only Current Month)
   const donutData = useMemo(() => {
@@ -433,6 +448,10 @@ export function DashboardClient({
     const catMap = new Map<string, { name: string; icon: string; value: number }>();
     currentMonthTx.forEach((t) => {
       if (t.type === "income") {
+        const acc = t.account_id ? accountsMap[t.account_id] : ((t as any).account || null);
+        const isCC = Boolean(acc && acc.type === 'credit_card');
+        if (isCC) return;
+
         const resolvedCat = t.category || categories.find(c => c.id === (t as any).category_id);
         const catName = resolvedCat?.name || "Outras Entradas";
         const catIcon = resolvedCat?.icon || "💰";
@@ -457,7 +476,7 @@ export function DashboardClient({
         ...item,
         color: INCOME_PALETTE[idx % INCOME_PALETTE.length]
       }));
-  }, [currentMonthTx, categories]);
+  }, [currentMonthTx, categories, accountsMap]);
 
   // Macro Bar Chart (Last 6 Months) — must come before ECharts options
   const macroBarData = useMemo(() => {
@@ -486,7 +505,12 @@ export function DashboardClient({
 
         const txEffectiveDate = getTransactionEffectiveDate(t);
         if (txEffectiveDate >= targetMonthStart && txEffectiveDate <= targetMonthEnd) {
-          if (t.type === 'income') inc += Number(t.amount);
+          const acc = t.account_id ? accountsMap[t.account_id] : ((t as any).account || null);
+          const isCC = Boolean(acc && acc.type === 'credit_card');
+          if (t.type === 'income') {
+            if (!isCC) inc += Number(t.amount);
+            else exp -= Number(t.amount);
+          }
           if (t.type === 'expense') exp += Number(t.amount);
         }
       });
@@ -494,7 +518,7 @@ export function DashboardClient({
       data.push({ name: monthLabel.charAt(0).toUpperCase() + monthLabel.slice(1), Receitas: inc, Despesas: exp });
     }
     return data;
-  }, [filteredTx, isInvoicePaymentTx, isTxConfirmed, getTransactionEffectiveDate]);
+  }, [filteredTx, isInvoicePaymentTx, isTxConfirmed, getTransactionEffectiveDate, accountsMap]);
 
   // ECharts options — Area Chart (Fluxo Diário)
   const areaChartOption = useMemo(() => ({
@@ -1351,7 +1375,7 @@ export function DashboardClient({
               <div className="p-4 rounded-2xl bg-emerald-50 border border-emerald-100 flex justify-between items-center shadow-2xs">
                 <div>
                   <div className="text-xs font-bold text-emerald-800 uppercase">Total de Entradas no Mês</div>
-                  <div className="text-[11px] text-emerald-600 font-medium">{currentMonthTx.filter(t => t.type === 'income').length} lançamentos</div>
+                  <div className="text-[11px] text-emerald-600 font-medium">{currentMonthTx.filter(t => t.type === 'income' && !(t.account_id && accountsMap[t.account_id]?.type === 'credit_card')).length} lançamentos</div>
                 </div>
                 <div className="text-xl font-black text-emerald-600 tabular-nums">
                   {globalBlur && !isUnlocked ? '••••' : currencyFmt.format(totalIncomes)}
@@ -1359,7 +1383,7 @@ export function DashboardClient({
               </div>
 
               <div className="max-h-80 overflow-y-auto divide-y divide-slate-100 pr-1">
-                {currentMonthTx.filter(t => t.type === 'income').map(t => (
+                {currentMonthTx.filter(t => t.type === 'income' && !(t.account_id && accountsMap[t.account_id]?.type === 'credit_card')).map(t => (
                   <div key={t.id} className="py-2.5 flex justify-between items-center text-xs">
                     <div className="flex items-center gap-2.5">
                       <span className="w-8 h-8 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center font-bold text-sm shrink-0">

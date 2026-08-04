@@ -76,7 +76,7 @@ function InvoiceRow({
           </div>
         </div>
         <div className="flex items-center gap-2 sm:gap-4 pl-2">
-          <div className="font-black text-xs sm:text-sm tabular-nums text-rose-600 whitespace-nowrap">
+          <div className={`font-black text-xs sm:text-sm tabular-nums whitespace-nowrap ${invoice.isPaid ? 'text-rose-400/70 line-through' : 'text-rose-600'}`}>
             - {currencyFmt.format(invoice.total)}
           </div>
           <div className={`w-7 h-7 sm:w-8 sm:h-8 flex items-center justify-center rounded-full transition-colors ${expanded ? 'bg-slate-100 text-slate-600' : 'text-slate-400 hover:bg-slate-50'}`}>
@@ -109,10 +109,10 @@ function InvoiceRow({
                   </div>
                   <div className="min-w-0 flex-1 space-y-0.5">
                     <div className="flex items-baseline justify-between gap-2 min-w-0">
-                      <p className="text-xs sm:text-sm font-bold text-slate-800 truncate min-w-0 flex-1">
+                      <p className={`text-xs sm:text-sm font-bold truncate min-w-0 flex-1 ${invoice.isPaid ? 'text-slate-500 line-through opacity-70' : 'text-slate-800'}`}>
                         {t.description}
                       </p>
-                      <span className={`text-xs sm:text-sm font-bold tabular-nums whitespace-nowrap shrink-0 ${t.ignore_in_cashflow ? 'text-slate-400 line-through' : 'text-rose-600'}`}>
+                      <span className={`text-xs sm:text-sm font-bold tabular-nums whitespace-nowrap shrink-0 ${t.ignore_in_cashflow ? 'text-slate-400 line-through' : invoice.isPaid ? 'text-rose-400/70 line-through' : 'text-rose-600'}`}>
                         - {currencyFmt.format(Number(t.amount))}
                       </span>
                     </div>
@@ -302,35 +302,45 @@ export function TransactionsClient({
   const [typeFilter, setTypeFilter] = useState<'all' | 'income' | 'expense' | 'transfer'>('all')
   const [categoryFilter, setCategoryFilter] = useState('all')
   const [accountFilter, setAccountFilter] = useState('all')
+  const [statusFilter, setStatusFilter] = useState<'all' | 'planned' | 'realized'>('all')
   const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth())
   const [selectedYear, setSelectedYear] = useState(new Date().getFullYear())
   const [isPending, startTransition] = useTransition()
   const processedItems = useMemo(() => {
     const itemsByDate: Record<string, Transaction[]> = {}
-    const invoicesByCard: Record<string, { account: Account; total: number; transactions: Transaction[] }> = {}
+    const invoicesByCard: Record<string, { account: Account; total: number; payments: number; transactions: Transaction[]; isPaid: boolean }> = {}
 
     transactions.forEach(t => {
       if (typeFilter !== 'all' && t.type !== typeFilter) return
       if (categoryFilter !== 'all' && t.category_id !== categoryFilter) return
       if (accountFilter !== 'all' && t.account_id !== accountFilter) return
+      
+      const isPlanned = t.status === 'pending'
+      if (statusFilter === 'planned' && !isPlanned) return
+      if (statusFilter === 'realized' && isPlanned) return
+
       if (search && !t.description.toLowerCase().includes(search.toLowerCase())) return
 
       const acc = accounts.find(a => a.id === t.account_id) || t.account
-      const isCCExpense = t.type === 'expense' && (acc?.type === 'credit_card' || t.account?.type === 'credit_card')
+      const isCCTransaction = (acc?.type === 'credit_card' || t.account?.type === 'credit_card') && (t.type === 'expense' || t.type === 'income')
 
-      if (isCCExpense && acc) {
+      if (isCCTransaction && acc) {
         const closingDay = (acc as any).closing_day || 1
         const dueDay = (acc as any).due_day || 10
         const cycles = getCreditCardCycles(closingDay, dueDay, new Date(t.date + 'T12:00:00'))
         const dueDate = cycles.current.dueDate
+        
+        const refMonth = dueDate.getMonth() === 0 ? 11 : dueDate.getMonth() - 1
+        const refYear = dueDate.getMonth() === 0 ? dueDate.getFullYear() - 1 : dueDate.getFullYear()
 
-        if (dueDate.getMonth() === selectedMonth && dueDate.getFullYear() === selectedYear) {
+        if (refMonth === selectedMonth && refYear === selectedYear) {
           if (!invoicesByCard[acc.id]) {
-            invoicesByCard[acc.id] = { account: acc, total: 0, transactions: [] }
+            invoicesByCard[acc.id] = { account: acc, total: 0, payments: 0, transactions: [], isPaid: false }
           }
           invoicesByCard[acc.id].transactions.push(t)
           if (!t.ignore_in_cashflow) {
-            invoicesByCard[acc.id].total += Number(t.amount)
+            if (t.type === 'expense') invoicesByCard[acc.id].total += Number(t.amount)
+            if (t.type === 'income') invoicesByCard[acc.id].total -= Number(t.amount)
           }
         }
       } else {
@@ -344,6 +354,36 @@ export function TransactionsClient({
       }
     })
 
+    transactions.forEach(t => {
+      if (t.type === 'transfer' && t.destination_account_id) {
+        const destAcc = accounts.find(a => a.id === t.destination_account_id)
+        if (destAcc?.type === 'credit_card' && invoicesByCard[destAcc.id]) {
+          const closingDay = (destAcc as any).closing_day || 1
+          const dueDay = (destAcc as any).due_day || 10
+          
+          const sampleTx = invoicesByCard[destAcc.id].transactions[0]
+          if (sampleTx) {
+            const sampleCycles = getCreditCardCycles(closingDay, dueDay, new Date(sampleTx.date + 'T12:00:00'))
+            const cycleEndStr = sampleCycles.current.end.toISOString().split('T')[0]
+            
+            const txDate = new Date(t.date + 'T12:00:00')
+            const paymentTargetCycle = getCreditCardCycles(closingDay, dueDay, txDate)
+            const targetClosing = (txDate > paymentTargetCycle.previous.end && txDate <= paymentTargetCycle.current.end)
+              ? paymentTargetCycle.previous.end
+              : paymentTargetCycle.current.end
+
+            if (targetClosing.toISOString().split('T')[0] === cycleEndStr) {
+              invoicesByCard[destAcc.id].payments += Number(t.amount)
+            }
+          }
+        }
+      }
+    })
+
+    Object.values(invoicesByCard).forEach(inv => {
+      inv.isPaid = inv.total <= 0 || inv.payments >= inv.total
+    })
+
     const sortedNormalDates = Object.entries(itemsByDate).sort(([a], [b]) => b.localeCompare(a))
 
     return {
@@ -351,9 +391,9 @@ export function TransactionsClient({
       normalDates: sortedNormalDates,
       isEmpty: Object.keys(invoicesByCard).length === 0 && sortedNormalDates.length === 0
     }
-  }, [transactions, search, typeFilter, categoryFilter, accountFilter, selectedMonth, selectedYear, accounts])
+  }, [transactions, search, typeFilter, categoryFilter, accountFilter, statusFilter, selectedMonth, selectedYear, accounts])
 
-  const hasActiveFilters = search !== '' || typeFilter !== 'all' || categoryFilter !== 'all' || accountFilter !== 'all'
+  const hasActiveFilters = search !== '' || typeFilter !== 'all' || categoryFilter !== 'all' || accountFilter !== 'all' || statusFilter !== 'all'
 
   const clearAllFilters = () => {
     setSearch('')
@@ -627,6 +667,22 @@ export function TransactionsClient({
               }`}
             >
               {f === 'all' ? 'Todos' : f === 'income' ? 'Receitas' : f === 'expense' ? 'Despesas' : 'Transf.'}
+            </button>
+          ))}
+        </div>
+
+        <div className="flex bg-slate-100 p-1 rounded-xl shrink-0 overflow-x-auto">
+          {(['all', 'planned', 'realized'] as const).map(f => (
+            <button
+              key={f}
+              onClick={() => setStatusFilter(f)}
+              className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all whitespace-nowrap cursor-pointer ${
+                statusFilter === f
+                  ? 'bg-white text-slate-800 shadow-xs'
+                  : 'text-slate-500 hover:text-slate-700'
+              }`}
+            >
+              {f === 'all' ? 'Qualquer' : f === 'planned' ? 'Planejados' : 'Realizados'}
             </button>
           ))}
         </div>

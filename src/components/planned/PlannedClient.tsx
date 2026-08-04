@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useMemo, useEffect, useTransition } from 'react'
+import { useState, useMemo, useEffect, useCallback, useTransition } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   CalendarDays,
@@ -206,6 +206,49 @@ export function PlannedClient({
       .sort((a, b) => new Date(b.date + 'T12:00:00').getTime() - new Date(a.date + 'T12:00:00').getTime())
   }, [localTransactions, cyclePeriod, accountsMap])
 
+  const isInvoicePaymentTx = useCallback((t: any) => {
+    if (t.type === 'transfer') {
+      const destAcc = accountsMap[t.destination_account_id]
+      if (destAcc?.type === 'credit_card') return true
+    }
+
+    const desc = (t.description || '').toLowerCase()
+    const catName = (t.category?.name || '').toLowerCase()
+
+    const keywords = [
+      'pagamento cart',
+      'pagamento de cart',
+      'pagamento fatura',
+      'pagamento de fatura',
+      'fatura cart',
+      'fatura nubank',
+      'fatura inter',
+      'fatura itau',
+      'pagamento nubank',
+      'pagamento inter'
+    ]
+
+    return keywords.some(k => desc.includes(k) || catName.includes(k))
+  }, [accountsMap])
+
+  const isTxConfirmed = useCallback((t: any) => {
+    const acc = t.account_id ? accountsMap[t.account_id] : (t.account || null)
+    const isCreditCard = Boolean(acc && acc.type === 'credit_card')
+
+    if (isCreditCard) {
+      if (t.status === 'paid_planned') return true
+
+      const hasInvoicePayment = localTransactions.some(other =>
+        isInvoicePaymentTx(other) &&
+        (other as any).destination_account_id === t.account_id &&
+        (other.status === 'posted' || other.status === 'paid_planned')
+      )
+      return hasInvoicePayment
+    }
+
+    return t.status === 'posted' || t.status === 'paid_planned'
+  }, [accountsMap, localTransactions, isInvoicePaymentTx])
+
   // Split categories
   const incomeCategories = useMemo(() => categories.filter(c => c.type === 'income'), [categories])
   const fixedCategories = useMemo(() => categories.filter(c => c.type === 'expense' && c.is_fixed && !c.is_investment), [categories])
@@ -246,7 +289,7 @@ export function PlannedClient({
       if (t.category_id) {
         const acc = t.account_id ? accountsMap[t.account_id] : (t.account || null)
         const isCreditCard = Boolean(acc && acc.type === 'credit_card')
-        const isConfirmed = isCreditCard ? t.status === 'paid_planned' : (t.status === 'paid_planned' || t.status === 'posted')
+        const isConfirmed = isTxConfirmed(t)
         if (isConfirmed) {
           if (t.type === 'expense') {
             map[t.category_id] = (map[t.category_id] || 0) + Number(t.amount)
@@ -257,7 +300,7 @@ export function PlannedClient({
       }
     })
     return map
-  }, [cycleTransactions, accountsMap])
+  }, [cycleTransactions, accountsMap, isTxConfirmed])
 
   // Metrics
   const metrics = useMemo(() => {
@@ -281,7 +324,7 @@ export function PlannedClient({
     cycleTransactions.forEach(t => {
       const acc = t.account_id ? accountsMap[t.account_id] : (t.account || null)
       const isCreditCard = Boolean(acc && acc.type === 'credit_card')
-      const isConfirmed = isCreditCard ? t.status === 'paid_planned' : (t.status === 'paid_planned' || t.status === 'posted')
+      const isConfirmed = isTxConfirmed(t)
       const amount = Number(t.amount)
 
       if (t.type === 'income') {
@@ -371,11 +414,12 @@ export function PlannedClient({
     const map: Record<string, number> = {}
 
     cycleTransactions.forEach(t => {
-      if (t.category_id && t.type === 'expense') {
+      if (t.category_id) {
+        const acc = t.account_id ? accountsMap[t.account_id] : (t.account || null)
+        const isCreditCard = Boolean(acc && acc.type === 'credit_card')
+
         if (dataMode === 'realized') {
-          const acc = t.account_id ? accountsMap[t.account_id] : (t.account || null)
-          const isCreditCard = Boolean(acc && acc.type === 'credit_card')
-          const isConfirmed = isCreditCard ? t.status === 'paid_planned' : (t.status === 'paid_planned' || t.status === 'posted')
+          const isConfirmed = isTxConfirmed(t)
           if (!isConfirmed) return
         }
 
@@ -383,21 +427,27 @@ export function PlannedClient({
         if (chartCostFilter === 'fixed' && !isFix) return
         if (chartCostFilter === 'variable' && isFix) return
 
-        map[t.category_id] = (map[t.category_id] || 0) + Number(t.amount)
+        if (t.type === 'expense') {
+          map[t.category_id] = (map[t.category_id] || 0) + Number(t.amount)
+        } else if (isCreditCard && t.type === 'income') {
+          map[t.category_id] = (map[t.category_id] || 0) - Number(t.amount)
+        }
       }
     })
     return map
-  }, [cycleTransactions, chartCostFilter, fixedCategories, dataMode, accountsMap])
+  }, [cycleTransactions, chartCostFilter, fixedCategories, dataMode, accountsMap, isTxConfirmed])
 
   // Receitas por categoria no ciclo (respeita dataMode)
   const receivedPerIncomeCategory = useMemo(() => {
     const map: Record<string, number> = {}
     cycleTransactions.forEach(t => {
       if (t.category_id && t.type === 'income') {
+        const acc = t.account_id ? accountsMap[t.account_id] : (t.account || null)
+        const isCreditCard = Boolean(acc && acc.type === 'credit_card')
+        if (isCreditCard) return
+
         if (dataMode === 'realized') {
-          const acc = t.account_id ? accountsMap[t.account_id] : (t.account || null)
-          const isCreditCard = Boolean(acc && acc.type === 'credit_card')
-          const isConfirmed = isCreditCard ? t.status === 'paid_planned' : (t.status === 'paid_planned' || t.status === 'posted')
+          const isConfirmed = isTxConfirmed(t)
           if (!isConfirmed) return
         }
 
@@ -405,7 +455,7 @@ export function PlannedClient({
       }
     })
     return map
-  }, [cycleTransactions, dataMode, accountsMap]) 
+  }, [cycleTransactions, dataMode, accountsMap, isTxConfirmed]) 
 
   // Category Legend Data for HTML Legend Grid
   const categoryLegendData = useMemo(() => {
@@ -863,11 +913,13 @@ export function PlannedClient({
   // Filter pending transactions for the list
   const pendingTransactions = useMemo(() => {
     return cycleTransactions.filter(t => {
-      if (pendingFilter === 'expense') return t.type === 'expense'
-      if (pendingFilter === 'income') return t.type === 'income'
+      const acc = t.account_id ? accountsMap[t.account_id] : (t.account || null)
+      const isCreditCard = Boolean(acc && acc.type === 'credit_card')
+      if (pendingFilter === 'expense') return t.type === 'expense' || (isCreditCard && t.type === 'income')
+      if (pendingFilter === 'income') return t.type === 'income' && !isCreditCard
       return true
     })
-  }, [cycleTransactions, pendingFilter])
+  }, [cycleTransactions, pendingFilter, accountsMap])
 
   const creditCardAccountsMap = useMemo(() => {
     const map: Record<string, any> = {}
@@ -878,28 +930,32 @@ export function PlannedClient({
   }, [accounts])
 
   const { creditCardGroups, standardTransactions } = useMemo(() => {
-    const groups: Record<string, { card: any; transactions: Transaction[]; total: number; isPaid: boolean }> = {}
+    const groups: Record<string, { card: any; transactions: Transaction[]; total: number; isPaid?: boolean }> = {}
     const standard: Transaction[] = []
 
     pendingTransactions.forEach(t => {
       const card = t.account_id ? creditCardAccountsMap[t.account_id] : null
-      if (card && t.type === 'expense') {
+      if (card) {
         if (!groups[card.id]) {
-          groups[card.id] = { card, transactions: [], total: 0, isPaid: false }
+          groups[card.id] = { card, transactions: [], total: 0 }
         }
         groups[card.id].transactions.push(t)
-        groups[card.id].total += Number(t.amount)
+        if (t.type === 'expense') {
+          groups[card.id].total += Number(t.amount)
+        } else if (t.type === 'income') {
+          groups[card.id].total -= Number(t.amount)
+        }
       } else {
         standard.push(t)
       }
     })
 
     Object.values(groups).forEach(g => {
-      g.isPaid = g.transactions.length > 0 && g.transactions.every(t => t.status === 'paid_planned')
+      g.isPaid = g.transactions.length > 0 && g.transactions.every(t => isTxConfirmed(t))
     })
 
     return { creditCardGroups: Object.values(groups), standardTransactions: standard }
-  }, [pendingTransactions, creditCardAccountsMap])
+  }, [pendingTransactions, creditCardAccountsMap, isTxConfirmed])
 
   const kpiModalTransactions = useMemo(() => {
     if (!kpiModal) return []
@@ -907,8 +963,11 @@ export function PlannedClient({
     const investmentCategoryIds = new Set(investmentCategories.map(c => c.id))
 
     return cycleTransactions.filter(t => {
-      if (kpiModal.type === 'income') return t.type === 'income'
-      if (t.type !== 'expense') return false
+      const acc = t.account_id ? accountsMap[t.account_id] : (t.account || null)
+      const isCreditCard = Boolean(acc && acc.type === 'credit_card')
+
+      if (kpiModal.type === 'income') return t.type === 'income' && !isCreditCard
+      if (t.type !== 'expense' && !(isCreditCard && t.type === 'income')) return false
 
       const isInvest = t.category_id && investmentCategoryIds.has(t.category_id)
       const isFix = Boolean(t.is_recurring) || Boolean(t.category_id && fixedCategoryIds.has(t.category_id))
@@ -919,7 +978,7 @@ export function PlannedClient({
 
       return true
     })
-  }, [kpiModal, cycleTransactions, fixedCategories, investmentCategories])
+  }, [kpiModal, cycleTransactions, fixedCategories, investmentCategories, accountsMap])
 
   const { kpiCreditCardGroups, kpiStandardTransactions } = useMemo(() => {
     const groups: Record<string, { card: any; transactions: Transaction[]; total: number }> = {}
@@ -2086,13 +2145,13 @@ export function PlannedClient({
                 onClick={() => setPendingFilter('expense')}
                 className={`flex-1 sm:flex-none px-2.5 py-1 rounded-md transition-all ${pendingFilter === 'expense' ? 'bg-white text-rose-600 shadow-sm' : 'text-slate-500'}`}
               >
-                A Pagar
+                Despesas
               </button>
               <button
                 onClick={() => setPendingFilter('income')}
                 className={`flex-1 sm:flex-none px-2.5 py-1 rounded-md transition-all ${pendingFilter === 'income' ? 'bg-white text-emerald-600 shadow-sm' : 'text-slate-500'}`}
               >
-                A Receber
+                Receitas
               </button>
             </div>
           </div>
@@ -2138,7 +2197,7 @@ export function PlannedClient({
                     {/* Lista interna de compras do cartão */}
                     <div className="flex flex-col gap-1.5 pt-2 border-t border-purple-100/70">
                       {group.transactions.map(t => {
-                        const isTxPaid = t.status === 'paid_planned'
+                        const isTxPaid = isTxConfirmed(t)
                         return (
                           <div
                             key={t.id}
@@ -2169,7 +2228,7 @@ export function PlannedClient({
               {/* Lançamentos de Contas Normais (Bancos, PIX, etc) */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5 max-h-[600px] overflow-y-auto pr-0.5">
                 {standardTransactions.map(t => {
-                  const isPaid = t.status === 'paid_planned' || t.status === 'posted'
+                  const isPaid = isTxConfirmed(t)
                   const isOverdue = new Date(t.date + 'T12:00:00') < new Date(new Date().setHours(0, 0, 0, 0)) && !isPaid
 
                   return (
@@ -2287,7 +2346,7 @@ export function PlannedClient({
 
                   <div className="flex flex-col gap-1.5 pt-1.5 border-t border-purple-100">
                     {group.transactions.map(t => {
-                      const isPaid = t.status === 'paid_planned'
+                      const isPaid = isTxConfirmed(t)
                       return (
                         <div
                           key={t.id}
@@ -2335,8 +2394,7 @@ export function PlannedClient({
               {/* Lançamentos comuns (Bancos, PIX, Dinheiro, Receitas) */}
               {kpiStandardTransactions.map(t => {
                 const acc = t.account_id ? accountsMap[t.account_id] : (t.account || null)
-                const isCreditCard = Boolean(acc && acc.type === 'credit_card')
-                const isPaid = isCreditCard ? t.status === 'paid_planned' : (t.status === 'paid_planned' || t.status === 'posted')
+                const isPaid = isTxConfirmed(t)
 
                 return (
                   <div
@@ -2525,7 +2583,7 @@ export function PlannedClient({
                 {catTxList.length > 0 ? (
                   <div className="flex flex-col gap-2.5 max-h-[380px] overflow-y-auto pr-0.5">
                     {catTxList.map(t => {
-                      const isPaid = t.status === 'paid_planned' || t.status === 'posted'
+                      const isPaid = isTxConfirmed(t)
                       const acc = t.account_id ? accountsMap[t.account_id] : (t.account || null)
 
                       return (

@@ -218,23 +218,39 @@ export function getInvoiceForOffset(card: any, transactions: any[], offsetMonths
   
   const cycles = getCreditCardCycles(card.closing_day || 1, card.due_day || 10, referenceDate)
   const cycle = cycles.current
+  const cycleEndStr = cycle.end.toISOString().split('T')[0]
   
   const cardTx = transactions.filter(t => t.account_id === card.id || t.destination_account_id === card.id)
   
   let total = 0
+  let payments = 0
   const txs: any[] = []
   
   for (const tx of cardTx) {
     const txDate = new Date(tx.date + 'T12:00:00')
-    if (txDate >= cycle.start && txDate <= cycle.end) {
-      if (tx.account_id === card.id && tx.type === 'expense') {
-        total += Number(tx.amount)
-        txs.push(tx)
-      } else if (tx.account_id === card.id && tx.type === 'income') {
-        total -= Number(tx.amount)
-        txs.push(tx)
-      } else if (tx.destination_account_id === card.id && tx.type === 'transfer') {
-        total -= Number(tx.amount)
+
+    if (tx.account_id === card.id) {
+      if (txDate >= cycle.start && txDate <= cycle.end) {
+        if (tx.type === 'expense') {
+          total += Number(tx.amount)
+          txs.push(tx)
+        } else if (tx.type === 'income') {
+          total -= Number(tx.amount)
+          txs.push(tx)
+        }
+      }
+    }
+
+    if (tx.destination_account_id === card.id && tx.type === 'transfer') {
+      const closingDay = card.closing_day || 1
+      const dueDay = card.due_day || 10
+      const paymentTargetCycle = getCreditCardCycles(closingDay, dueDay, txDate)
+      const targetClosing = (txDate > paymentTargetCycle.previous.end && txDate <= paymentTargetCycle.current.end)
+        ? paymentTargetCycle.previous.end
+        : paymentTargetCycle.current.end
+
+      if (targetClosing.toISOString().split('T')[0] === cycleEndStr) {
+        payments += Number(tx.amount)
         txs.push(tx)
       }
     }
@@ -247,6 +263,8 @@ export function getInvoiceForOffset(card: any, transactions: any[], offsetMonths
   let bg = ''
   let color = ''
   
+  const isPaid = total <= 0 || payments >= total
+
   if (offsetMonths === 0) {
     title = 'Fatura Atual'
     status = 'Aberta'
@@ -254,9 +272,9 @@ export function getInvoiceForOffset(card: any, transactions: any[], offsetMonths
     color = 'text-blue-500'
   } else if (offsetMonths === -1) {
     title = 'Fatura Anterior'
-    status = total <= 0 ? 'Paga' : 'Fechada'
-    bg = total <= 0 ? 'bg-emerald-50' : 'bg-rose-50'
-    color = total <= 0 ? 'text-emerald-500' : 'text-rose-500'
+    status = isPaid ? 'Paga' : 'Fechada'
+    bg = isPaid ? 'bg-emerald-50' : 'bg-rose-50'
+    color = isPaid ? 'text-emerald-500' : 'text-rose-500'
   } else if (offsetMonths === 1) {
     title = 'Próxima Fatura'
     status = 'Futura'
@@ -264,9 +282,9 @@ export function getInvoiceForOffset(card: any, transactions: any[], offsetMonths
     color = 'text-slate-500'
   } else if (offsetMonths < -1) {
     title = `Fatura de ${new Intl.DateTimeFormat('pt-BR', { month: 'long' }).format(cycle.dueDate)}`
-    status = total <= 0 ? 'Paga' : 'Fechada'
-    bg = total <= 0 ? 'bg-emerald-50' : 'bg-rose-50'
-    color = total <= 0 ? 'text-emerald-500' : 'text-rose-500'
+    status = isPaid ? 'Paga' : 'Fechada'
+    bg = isPaid ? 'bg-emerald-50' : 'bg-rose-50'
+    color = isPaid ? 'text-emerald-500' : 'text-rose-500'
   } else {
     title = `Fatura de ${new Intl.DateTimeFormat('pt-BR', { month: 'long' }).format(cycle.dueDate)}`
     status = 'Futura'
