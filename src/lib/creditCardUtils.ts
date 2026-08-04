@@ -107,82 +107,103 @@ export function calculateCardBalances(card: any, transactions: any[]) {
   
   const cycles = getCreditCardCycles(card.closing_day || 1, card.due_day || 10)
   
-  let currentInvoiceTotal = 0
-  let previousInvoiceTotal = 0
-  let nextInvoiceTotal = 0
+  let previousGross = 0
+  let currentGross = 0
+  let nextGross = 0
   
   const currentTxs: any[] = []
   const previousTxs: any[] = []
   const nextTxs: any[] = []
   
-  let totalBalance = 0 // Saldo devedor total
+  let totalBalance = 0
+  let totalPayments = 0
 
   for (const tx of cardTx) {
     // Add T12:00:00 to avoid timezone shifting YYYY-MM-DD backwards by 3 hours in BRT
     const txDate = new Date(tx.date + 'T12:00:00')
+    const amt = Number(tx.amount || 0)
     
     // Gastos no cartão (account_id = card.id)
     if (tx.account_id === card.id && tx.type === 'expense') {
-      totalBalance += Number(tx.amount)
+      totalBalance += amt
       
-      if (txDate >= cycles.current.start && txDate <= cycles.current.end) {
-        currentInvoiceTotal += Number(tx.amount)
-        currentTxs.push(tx)
-      } else if (txDate >= cycles.previous.start && txDate <= cycles.previous.end) {
-        previousInvoiceTotal += Number(tx.amount)
+      if (txDate <= cycles.previous.end) {
+        previousGross += amt
         previousTxs.push(tx)
-      } else if (txDate >= cycles.next.start && txDate <= cycles.next.end) {
-        nextInvoiceTotal += Number(tx.amount)
+      } else if (txDate <= cycles.current.end) {
+        currentGross += amt
+        currentTxs.push(tx)
+      } else {
+        nextGross += amt
         nextTxs.push(tx)
       }
     }
     
     // Estornos / Créditos no cartão (account_id = card.id && type = 'income')
     if (tx.account_id === card.id && tx.type === 'income') {
-      totalBalance -= Number(tx.amount)
+      totalBalance -= amt
       
-      if (txDate >= cycles.current.start && txDate <= cycles.current.end) {
-        currentInvoiceTotal -= Number(tx.amount)
-        currentTxs.push(tx)
-      } else if (txDate >= cycles.previous.start && txDate <= cycles.previous.end) {
-        previousInvoiceTotal -= Number(tx.amount)
+      if (txDate <= cycles.previous.end) {
+        previousGross -= amt
         previousTxs.push(tx)
-      } else if (txDate >= cycles.next.start && txDate <= cycles.next.end) {
-        nextInvoiceTotal -= Number(tx.amount)
+      } else if (txDate <= cycles.current.end) {
+        currentGross -= amt
+        currentTxs.push(tx)
+      } else {
+        nextGross -= amt
         nextTxs.push(tx)
       }
     }
 
     // Pagamentos do cartão (transferência PARA o cartão)
     if (tx.destination_account_id === card.id && tx.type === 'transfer') {
-      totalBalance -= Number(tx.amount)
+      totalBalance -= amt
+      totalPayments += amt
       
-      if (txDate >= cycles.current.start && txDate <= cycles.current.end) {
-        currentInvoiceTotal -= Number(tx.amount)
-        currentTxs.push(tx)
-      } else if (txDate >= cycles.previous.start && txDate <= cycles.previous.end) {
-        previousInvoiceTotal -= Number(tx.amount)
+      if (txDate <= cycles.previous.end) {
         previousTxs.push(tx)
-      } else if (txDate >= cycles.next.start && txDate <= cycles.next.end) {
-        nextInvoiceTotal -= Number(tx.amount)
+      } else if (txDate <= cycles.current.end) {
+        currentTxs.push(tx)
+      } else {
         nextTxs.push(tx)
       }
     }
   }
+
+  // Abater pagamentos acumulados: primeiro a fatura anterior fechada, depois a atual, depois a próxima
+  let remainingPayments = totalPayments
+
+  let previousNet = Math.max(0, previousGross)
+  const paidToPrevious = Math.min(previousNet, remainingPayments)
+  previousNet -= paidToPrevious
+  remainingPayments -= paidToPrevious
+
+  let currentNet = Math.max(0, currentGross)
+  const paidToCurrent = Math.min(currentNet, remainingPayments)
+  currentNet -= paidToCurrent
+  remainingPayments -= paidToCurrent
+
+  let nextNet = Math.max(0, nextGross)
+  const paidToNext = Math.min(nextNet, remainingPayments)
+  nextNet -= paidToNext
+  remainingPayments -= paidToNext
 
   // Ordenar transações da mais recente para mais antiga
   currentTxs.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
   previousTxs.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
   nextTxs.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
 
+  const activePayAmount = previousNet > 0 ? previousNet : currentNet
+
   return {
     cycles,
     totals: {
-      current: Math.max(0, currentInvoiceTotal), // não deixar negativo se pagou a mais
-      previous: Math.max(0, previousInvoiceTotal),
-      next: Math.max(0, nextInvoiceTotal),
-      totalDebt: totalBalance
+      current: currentNet,
+      previous: previousNet,
+      next: nextNet,
+      totalDebt: Math.max(0, totalBalance)
     },
+    activePayAmount,
     txs: {
       current: currentTxs,
       previous: previousTxs,

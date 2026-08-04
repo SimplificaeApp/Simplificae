@@ -216,12 +216,18 @@ export function PlannedClient({
   const spentPerCategory = useMemo(() => {
     const map: Record<string, number> = {}
     cycleTransactions.forEach(t => {
-      if (t.category_id && t.type === 'expense') {
-        map[t.category_id] = (map[t.category_id] || 0) + Number(t.amount)
+      if (t.category_id) {
+        const acc = t.account_id ? accountsMap[t.account_id] : (t.account || null)
+        const isCreditCard = Boolean(acc && acc.type === 'credit_card')
+        if (t.type === 'expense') {
+          map[t.category_id] = (map[t.category_id] || 0) + Number(t.amount)
+        } else if (isCreditCard && t.type === 'income') {
+          map[t.category_id] = (map[t.category_id] || 0) - Number(t.amount)
+        }
       }
     })
     return map
-  }, [cycleTransactions])
+  }, [cycleTransactions, accountsMap])
 
   // Active variable categories (categories with budget set or spent in cycle)
   const activeVariableCategories = useMemo(() => {
@@ -242,7 +248,11 @@ export function PlannedClient({
         const isCreditCard = Boolean(acc && acc.type === 'credit_card')
         const isConfirmed = isCreditCard ? t.status === 'paid_planned' : (t.status === 'paid_planned' || t.status === 'posted')
         if (isConfirmed) {
-          map[t.category_id] = (map[t.category_id] || 0) + Number(t.amount)
+          if (t.type === 'expense') {
+            map[t.category_id] = (map[t.category_id] || 0) + Number(t.amount)
+          } else if (isCreditCard && t.type === 'income') {
+            map[t.category_id] = (map[t.category_id] || 0) - Number(t.amount)
+          }
         }
       }
     })
@@ -275,8 +285,25 @@ export function PlannedClient({
       const amount = Number(t.amount)
 
       if (t.type === 'income') {
-        totalIncome += amount
-        if (isConfirmed) confirmedIncome += amount
+        if (!isCreditCard) {
+          totalIncome += amount
+          if (isConfirmed) confirmedIncome += amount
+        } else {
+          // Estorno de cartão de crédito abate gastos, não entra como receita
+          const isInvest = t.category_id && investmentCategoryIds.has(t.category_id)
+          const isFix = Boolean(t.is_recurring) || Boolean(t.category_id && fixedCategoryIds.has(t.category_id))
+
+          if (isInvest) {
+            spentInvestments -= amount
+            if (isConfirmed) confirmedInvestments -= amount
+          } else if (isFix) {
+            spentFixed -= amount
+            if (isConfirmed) confirmedFixed -= amount
+          } else {
+            spentVariable -= amount
+            if (isConfirmed) confirmedVariable -= amount
+          }
+        }
         return
       }
 

@@ -14,14 +14,21 @@ interface PayInvoiceFormProps {
   workspaceId: string
   card: any
   accounts: any[]
+  defaultAmount?: number
   onSuccess?: () => void
 }
 
-export function PayInvoiceForm({ workspaceId, card, accounts, onSuccess }: PayInvoiceFormProps) {
+export function PayInvoiceForm({ workspaceId, card, accounts, defaultAmount, onSuccess }: PayInvoiceFormProps) {
   const [isPendingLocal, setIsPendingLocal] = useState(false)
   const pending = isPendingLocal
   const [localError, setLocalError] = useState<string | null>(null)
-  const [amount, setAmount] = useState('')
+  const [amount, setAmount] = useState(() => {
+    if (defaultAmount && defaultAmount > 0) {
+      const valStr = defaultAmount.toFixed(2).replace('.', ',')
+      return valStr.replace(/\B(?=(\d{3})+(?!\d))/g, ".")
+    }
+    return ''
+  })
 
   const router = useRouter()
   const invalidateData = useInvalidateFinancialData()

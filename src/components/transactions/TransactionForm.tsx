@@ -187,6 +187,17 @@ export function TransactionForm({
   const [accountId, setAccountId] = useState<string>(initialData?.account_id || defaultAccountId || '')
   const [destinationAccountId, setDestinationAccountId] = useState<string>(initialData?.destination_account_id || '')
   const [isPlanned, setIsPlanned] = useState(initialData?.status === 'pending' || false)
+
+  useEffect(() => {
+    if (initialData?.account_id) {
+      setAccountId(initialData.account_id)
+    } else if (defaultAccountId) {
+      setAccountId(defaultAccountId)
+    } else if (isCreditCard) {
+      const firstCC = accounts.find((a: any) => a.type === 'credit_card')
+      if (firstCC) setAccountId(firstCC.id)
+    }
+  }, [initialData, defaultAccountId, isCreditCard, accounts])
   
   const [freqMode, setFreqMode] = useState<'single' | 'recurring' | 'installment'>('single')
   const [installments, setInstallments] = useState(2)

@@ -220,13 +220,13 @@ export function CreditCardsClient({
     setIsDetailsOpen(true)
   }
 
-  const handleOpenTransaction = (card: any) => {
-    setSelectedCard(card)
+  const handleOpenTransaction = (card?: any) => {
+    if (card && card.id) setSelectedCard(card)
     setIsTransactionOpen(true)
   }
 
-  const handleOpenPayInvoice = (card: any) => {
-    setSelectedCard(card)
+  const handleOpenPayInvoice = (card?: any) => {
+    if (card && card.id) setSelectedCard(card)
     setIsPayInvoiceOpen(true)
   }
 
@@ -480,17 +480,47 @@ export function CreditCardsClient({
       >
         {selectedCard && (
           <div className="flex flex-col gap-3">
-            <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl mb-2">
-              <p className="text-sm text-slate-500 font-medium mb-1">Fatura Atual (estimativa)</p>
-              <h2 className="text-3xl font-black text-slate-800">R$ {(selectedCardCalc?.totals.current ?? 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</h2>
-              <div className="flex justify-between text-xs text-slate-400 mt-2">
-                <span>Limite: R$ {Number(selectedCard.credit_limit || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
-                <span>Disponível: R$ {Math.max(0, Number(selectedCard.credit_limit || 0) - (selectedCardCalc?.totals.totalDebt || 0)).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
+            {selectedCardCalc && selectedCardCalc.totals.previous > 0 ? (
+              <div className="p-4 bg-rose-50/70 border border-rose-200/80 rounded-xl mb-2">
+                <div className="flex justify-between items-center mb-1">
+                  <p className="text-xs font-bold uppercase tracking-wider text-rose-600">Fatura Fechada (A Vencer)</p>
+                  <span className="text-[11px] font-bold text-rose-600 bg-white px-2 py-0.5 rounded-md border border-rose-200 shadow-2xs">
+                    Vence {new Intl.DateTimeFormat('pt-BR', { day: '2-digit', month: '2-digit' }).format(selectedCardCalc.cycles.previous.dueDate)}
+                  </span>
+                </div>
+                <h2 className="text-3xl font-black text-slate-900">
+                  R$ {selectedCardCalc.totals.previous.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                </h2>
+                <p className="text-xs text-slate-500 mt-1 font-medium">
+                  Próxima fatura em aberto: R$ {selectedCardCalc.totals.current.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                </p>
+                <div className="flex justify-between text-xs text-slate-500 mt-3 pt-2 border-t border-rose-200/60">
+                  <span>Limite: R$ {Number(selectedCard.credit_limit || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
+                  <span>Disponível: R$ {Math.max(0, Number(selectedCard.credit_limit || 0) - selectedCardCalc.totals.totalDebt).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
+                </div>
               </div>
-            </div>
+            ) : (
+              <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl mb-2">
+                <div className="flex justify-between items-center mb-1">
+                  <p className="text-xs font-bold uppercase tracking-wider text-slate-500">Fatura Atual (em aberto)</p>
+                  {selectedCardCalc && (
+                    <span className="text-[11px] font-bold text-slate-600 bg-white px-2 py-0.5 rounded-md border border-slate-200 shadow-2xs">
+                      Vence {new Intl.DateTimeFormat('pt-BR', { day: '2-digit', month: '2-digit' }).format(selectedCardCalc.cycles.current.dueDate)}
+                    </span>
+                  )}
+                </div>
+                <h2 className="text-3xl font-black text-slate-800">
+                  R$ {(selectedCardCalc?.totals.current ?? 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                </h2>
+                <div className="flex justify-between text-xs text-slate-400 mt-3 pt-2 border-t border-slate-200">
+                  <span>Limite: R$ {Number(selectedCard.credit_limit || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
+                  <span>Disponível: R$ {Math.max(0, Number(selectedCard.credit_limit || 0) - (selectedCardCalc?.totals.totalDebt || 0)).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
+                </div>
+              </div>
+            )}
 
             <button 
-              onClick={handleOpenTransaction}
+              onClick={() => handleOpenTransaction()}
               className="w-full flex items-center gap-4 p-4 bg-white border border-slate-200 rounded-xl hover:border-emerald-300 hover:bg-emerald-50 transition-all text-left group"
             >
               <div className="w-10 h-10 bg-emerald-100 rounded-lg flex items-center justify-center text-emerald-600 group-hover:scale-110 transition-transform">
@@ -503,7 +533,7 @@ export function CreditCardsClient({
             </button>
 
             <button 
-              onClick={handleOpenPayInvoice}
+              onClick={() => handleOpenPayInvoice()}
               className="w-full flex items-center gap-4 p-4 bg-white border border-slate-200 rounded-xl hover:border-emerald-300 hover:bg-emerald-50 transition-all text-left group"
             >
               <div className="w-10 h-10 bg-emerald-100 rounded-lg flex items-center justify-center text-emerald-600 group-hover:scale-110 transition-transform">
@@ -537,6 +567,7 @@ export function CreditCardsClient({
         title="Novo Lançamento no Cartão"
       >
         <TransactionForm 
+          key={selectedCard?.id || 'new-tx'}
           workspaceId={workspaceId}
           categories={categories}
           accounts={allAccounts}
@@ -553,9 +584,11 @@ export function CreditCardsClient({
         title="Pagar Fatura"
       >
         <PayInvoiceForm
+          key={selectedCard?.id || 'pay-form'}
           workspaceId={workspaceId}
           card={selectedCard}
           accounts={allAccounts.filter(a => a.type !== 'credit_card')}
+          defaultAmount={selectedCardCalc?.activePayAmount}
           onSuccess={() => setIsPayInvoiceOpen(false)}
         />
       </Modal>
