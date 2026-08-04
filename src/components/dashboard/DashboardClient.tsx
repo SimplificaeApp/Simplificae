@@ -198,18 +198,6 @@ export function DashboardClient({
     ...categories.map((c) => ({ id: c.id, label: c.name, icon: c.icon }))
   ], [categories]);
 
-  const filteredTx = useMemo(() => {
-    return transactions.filter(t => {
-      // ONLY include confirmed / posted transactions (exclude 'pending' / unconfirmed items)
-      const isConfirmed = t.status === 'posted' || t.status === 'paid_planned' || (t.status && t.status !== 'pending');
-      if (!isConfirmed) return false;
-
-      if (selectedAccount !== "all" && t.account_id !== selectedAccount) return false;
-      if (selectedCategory !== "all" && t.category_id !== selectedCategory) return false;
-      return true;
-    });
-  }, [transactions, selectedAccount, selectedCategory]);
-
   const isInvoicePaymentTx = useCallback((t: Transaction) => {
     if (t.type === 'transfer') {
       const destAcc = accountsMap[(t as any).destination_account_id];
@@ -235,6 +223,36 @@ export function DashboardClient({
     return keywords.some(k => desc.includes(k) || catName.includes(k));
   }, [accountsMap]);
 
+  const isTxConfirmed = useCallback((t: Transaction) => {
+    const acc = t.account_id ? accountsMap[t.account_id] : null;
+    const isCreditCard = acc?.type === 'credit_card';
+
+    if (isCreditCard) {
+      if (t.status === 'paid_planned') return true;
+
+      const hasInvoicePayment = transactions.some(other =>
+        isInvoicePaymentTx(other) &&
+        (other as any).destination_account_id === t.account_id &&
+        (other.status === 'posted' || other.status === 'paid_planned')
+      );
+      return hasInvoicePayment;
+    }
+
+    return t.status === 'posted' || t.status === 'paid_planned';
+  }, [accountsMap, transactions, isInvoicePaymentTx]);
+
+  const filteredTx = useMemo(() => {
+    return transactions.filter(t => {
+      // ONLY include confirmed / posted transactions (exclude 'pending' / unconfirmed items)
+      const isConfirmed = isTxConfirmed(t);
+      if (!isConfirmed && !isInvoicePaymentTx(t)) return false;
+
+      if (selectedAccount !== "all" && t.account_id !== selectedAccount) return false;
+      if (selectedCategory !== "all" && t.category_id !== selectedCategory) return false;
+      return true;
+    });
+  }, [transactions, selectedAccount, selectedCategory, isTxConfirmed, isInvoicePaymentTx]);
+
   const cyclePeriod = useMemo(() => {
     const now = new Date();
     const currentMonth = now.getMonth();
@@ -254,15 +272,14 @@ export function DashboardClient({
     return new Date(t.date + 'T12:00:00');
   }, [accountsMap]);
 
-  // Isolate current month transactions for KPIs strictly by effective date and confirmed status (status === 'posted' || status === 'paid_planned')
+  // Isolate current month transactions for KPIs strictly by effective date and confirmed status
   const currentMonthTx = useMemo(() => {
     return filteredTx
       .filter(t => {
         if (t.ignore_in_cashflow) return false;
 
-        // ONLY include confirmed / posted transactions (exclude 'planned' / unconfirmed items)
-        const isConfirmed = t.status === 'posted' || t.status === 'paid_planned';
-        if (!isConfirmed) return false;
+        const isConfirmed = isTxConfirmed(t);
+        if (!isConfirmed && !isInvoicePaymentTx(t)) return false;
 
         // Check if invoice payment transfer should be ignored (only ignore if individual CC purchases are already confirmed for that card)
         if (isInvoicePaymentTx(t)) {
@@ -270,7 +287,7 @@ export function DashboardClient({
           const hasIndividualCCExpenses = filteredTx.some(other =>
             other.account_id === destCardId &&
             other.type === 'expense' &&
-            (other.status === 'posted' || other.status === 'paid_planned')
+            isTxConfirmed(other)
           );
           if (hasIndividualCCExpenses) return false;
         }
@@ -279,7 +296,7 @@ export function DashboardClient({
         return txEffectiveDate >= cyclePeriod.startDate && txEffectiveDate <= cyclePeriod.endDate;
       })
       .sort((a, b) => new Date(b.date + 'T12:00:00').getTime() - new Date(a.date + 'T12:00:00').getTime());
-  }, [filteredTx, cyclePeriod, isInvoicePaymentTx, getTransactionEffectiveDate]);
+  }, [filteredTx, cyclePeriod, isInvoicePaymentTx, isTxConfirmed, getTransactionEffectiveDate]);
 
   // KPIs (Only Current Month)
   const totalIncomes = useMemo(
@@ -408,15 +425,15 @@ export function DashboardClient({
       filteredTx.forEach((t: Transaction) => {
         if (t.ignore_in_cashflow) return;
 
-        const isConfirmed = t.status === 'posted' || t.status === 'paid_planned';
-        if (!isConfirmed) return;
+        const isConfirmed = isTxConfirmed(t);
+        if (!isConfirmed && !isInvoicePaymentTx(t)) return;
 
         if (isInvoicePaymentTx(t)) {
           const destCardId = (t as any).destination_account_id;
           const hasIndividualCCExpenses = filteredTx.some(other =>
             other.account_id === destCardId &&
             other.type === 'expense' &&
-            (other.status === 'posted' || other.status === 'paid_planned')
+            isTxConfirmed(other)
           );
           if (hasIndividualCCExpenses) return;
         }
@@ -431,7 +448,7 @@ export function DashboardClient({
       data.push({ name: monthLabel.charAt(0).toUpperCase() + monthLabel.slice(1), Receitas: inc, Despesas: exp });
     }
     return data;
-  }, [filteredTx, isInvoicePaymentTx, getTransactionEffectiveDate]);
+  }, [filteredTx, isInvoicePaymentTx, isTxConfirmed, getTransactionEffectiveDate]);
 
   // ECharts options — Area Chart (Fluxo Diário)
   const areaChartOption = useMemo(() => ({
