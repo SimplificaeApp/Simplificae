@@ -342,3 +342,27 @@ export function getCreditCardDueDate(dateStr: string, closingDay: number = 1, du
   return new Date(dueYear, dueMonth, finalDueDay, 12, 0, 0)
 }
 
+export function getTxInvoiceClosingKey(card: any, txDate: Date): string {
+  const closingDay = card?.closing_day || 1
+  const dueDay = card?.due_day || 10
+  const cycles = getCreditCardCycles(closingDay, dueDay, txDate)
+  if (txDate <= cycles.previous.end) {
+    return cycles.previous.end.toISOString().split('T')[0]
+  } else if (txDate <= cycles.current.end) {
+    return cycles.current.end.toISOString().split('T')[0]
+  } else {
+    return cycles.next.end.toISOString().split('T')[0]
+  }
+}
+
+export function getPaymentTargetClosingKey(card: any, paymentDate: Date): string {
+  const closingDay = card?.closing_day || 1
+  const dueDay = card?.due_day || 10
+  const paymentTargetCycle = getCreditCardCycles(closingDay, dueDay, paymentDate)
+  const targetClosing = (paymentDate > paymentTargetCycle.previous.end && paymentDate <= paymentTargetCycle.current.end)
+    ? paymentTargetCycle.previous.end
+    : paymentTargetCycle.current.end
+  return targetClosing.toISOString().split('T')[0]
+}
+
+

@@ -35,7 +35,7 @@ import { TransactionForm } from '@/components/transactions/TransactionForm'
 import { CategoryForm } from '@/components/settings/CategoryForm'
 import { payTransactionNew, unpayTransaction, deleteTransaction } from '@/app/actions/transactions'
 import { updateWorkspaceTurnoverDay } from '@/app/actions/settings'
-import { getCreditCardDueDate } from '@/lib/creditCardUtils'
+import { getCreditCardDueDate, getTxInvoiceClosingKey, getPaymentTargetClosingKey } from '@/lib/creditCardUtils'
 import { toast } from 'sonner'
 import { useTransactionsQuery, useCategoriesQuery, useAccountsQuery, useInvalidateFinancialData, QUERY_KEYS } from '@/hooks/useFinancialData'
 import { useQueryClient } from '@tanstack/react-query'
@@ -193,7 +193,7 @@ export function PlannedClient({
 
         let txEffectiveDate: Date
         const acc = t.account_id ? accountsMap[t.account_id] : (t.account || null)
-        if (acc && acc.type === 'credit_card' && t.type === 'expense') {
+        if (acc && acc.type === 'credit_card' && (t.type === 'expense' || t.type === 'income')) {
           const closingDay = acc.closing_day || 1
           const dueDay = acc.due_day || 10
           txEffectiveDate = getCreditCardDueDate(t.date, closingDay, dueDay)
@@ -238,11 +238,18 @@ export function PlannedClient({
     if (isCreditCard) {
       if (t.status === 'paid_planned') return true
 
-      const hasInvoicePayment = localTransactions.some(other =>
-        isInvoicePaymentTx(other) &&
-        (other as any).destination_account_id === t.account_id &&
-        (other.status === 'posted' || other.status === 'paid_planned')
-      )
+      const tDate = new Date(t.date + 'T12:00:00')
+      const tClosingKey = getTxInvoiceClosingKey(acc, tDate)
+
+      const hasInvoicePayment = localTransactions.some(other => {
+        if (!isInvoicePaymentTx(other)) return false
+        if ((other as any).destination_account_id !== t.account_id) return false
+        if (other.status !== 'posted' && other.status !== 'paid_planned') return false
+
+        const payDate = new Date(other.date + 'T12:00:00')
+        const payClosingKey = getPaymentTargetClosingKey(acc, payDate)
+        return payClosingKey === tClosingKey
+      })
       return hasInvoicePayment
     }
 
@@ -986,12 +993,16 @@ export function PlannedClient({
 
     kpiModalTransactions.forEach(t => {
       const card = t.account_id ? creditCardAccountsMap[t.account_id] : null
-      if (card && t.type === 'expense') {
+      if (card) {
         if (!groups[card.id]) {
           groups[card.id] = { card, transactions: [], total: 0 }
         }
         groups[card.id].transactions.push(t)
-        groups[card.id].total += Number(t.amount)
+        if (t.type === 'expense') {
+          groups[card.id].total += Number(t.amount)
+        } else if (t.type === 'income') {
+          groups[card.id].total -= Number(t.amount)
+        }
       } else {
         standard.push(t)
       }
@@ -2198,6 +2209,7 @@ export function PlannedClient({
                     <div className="flex flex-col gap-1.5 pt-2 border-t border-purple-100/70">
                       {group.transactions.map(t => {
                         const isTxPaid = isTxConfirmed(t)
+                        const isIncome = t.type === 'income'
                         return (
                           <div
                             key={t.id}
@@ -2208,14 +2220,19 @@ export function PlannedClient({
                             className="flex items-center justify-between p-2 rounded-xl bg-white/80 hover:bg-white border border-slate-100 hover:border-purple-300 cursor-pointer transition-all text-xs"
                           >
                             <div className="flex items-center gap-2 min-w-0 flex-1">
-                              <span className="text-sm shrink-0">{t.category?.icon || '💳'}</span>
-                              <span className={`font-semibold text-slate-800 truncate ${isTxPaid ? 'line-through opacity-60' : ''}`}>
-                                {t.description}
+                              <span className="text-sm shrink-0">{t.category?.icon || (isIncome ? '↩️' : '💳')}</span>
+                              <span className={`font-semibold text-slate-800 truncate flex items-center gap-1 ${isTxPaid ? 'line-through opacity-60' : ''}`}>
+                                <span>{t.description}</span>
+                                {isIncome && (
+                                  <span className="text-[9px] font-bold text-emerald-700 bg-emerald-50 px-1 py-0.2 rounded border border-emerald-200 shrink-0">
+                                    Estorno
+                                  </span>
+                                )}
                               </span>
                               <span className="text-[10px] text-slate-400 shrink-0">({dateFmt.format(new Date(t.date + 'T12:00:00'))})</span>
                             </div>
-                            <span className="font-bold tabular-nums text-rose-600 shrink-0 ml-2">
-                              {currencyFmt.format(Number(t.amount))}
+                            <span className={`font-bold tabular-nums shrink-0 ml-2 ${isIncome ? 'text-emerald-600' : 'text-rose-600'}`}>
+                              {isIncome ? `- ${currencyFmt.format(Number(t.amount))}` : currencyFmt.format(Number(t.amount))}
                             </span>
                           </div>
                         )
@@ -2347,6 +2364,7 @@ export function PlannedClient({
                   <div className="flex flex-col gap-1.5 pt-1.5 border-t border-purple-100">
                     {group.transactions.map(t => {
                       const isPaid = isTxConfirmed(t)
+                      const isIncome = t.type === 'income'
                       return (
                         <div
                           key={t.id}
@@ -2360,10 +2378,15 @@ export function PlannedClient({
                             }`}
                         >
                           <div className="flex items-center gap-2 min-w-0 flex-1">
-                            <span className="text-sm shrink-0">{t.category?.icon || '💳'}</span>
+                            <span className="text-sm shrink-0">{t.category?.icon || (isIncome ? '↩️' : '💳')}</span>
                             <div className="min-w-0 flex-1">
-                              <div className={`font-bold text-xs truncate ${isPaid ? 'line-through text-slate-400' : 'text-slate-800'}`}>
-                                {t.description}
+                              <div className={`font-bold text-xs truncate flex items-center gap-1 ${isPaid ? 'line-through text-slate-400' : 'text-slate-800'}`}>
+                                <span>{t.description}</span>
+                                {isIncome && (
+                                  <span className="text-[9px] font-bold text-emerald-700 bg-emerald-50 px-1 py-0.2 rounded border border-emerald-200 shrink-0">
+                                    Estorno
+                                  </span>
+                                )}
                               </div>
                               <div className="text-[10px] text-slate-400 font-medium">
                                 {dateFmt.format(new Date(t.date + 'T12:00:00'))} • {t.category?.name || 'Geral'}
@@ -2380,8 +2403,8 @@ export function PlannedClient({
                                 Fatura Aberta
                               </span>
                             )}
-                            <span className={`font-black text-xs tabular-nums ${isPaid ? 'line-through text-slate-400' : 'text-rose-600'}`}>
-                              {currencyFmt.format(Number(t.amount))}
+                            <span className={`font-black text-xs tabular-nums ${isPaid ? 'line-through text-slate-400' : (isIncome ? 'text-emerald-600' : 'text-rose-600')}`}>
+                              {isIncome ? `- ${currencyFmt.format(Number(t.amount))}` : currencyFmt.format(Number(t.amount))}
                             </span>
                           </div>
                         </div>

@@ -12,7 +12,7 @@ import { Modal } from '@/components/ui/Modal'
 import { CustomSelect } from '@/components/ui/CustomSelect'
 import { TransactionForm } from './TransactionForm'
 import { deleteTransaction, markAsPosted, unpayTransaction } from '@/app/actions/transactions'
-import { getCreditCardCycles } from '@/lib/creditCardUtils'
+import { getCreditCardCycles, getCreditCardDueDate, getTxInvoiceClosingKey, getPaymentTargetClosingKey } from '@/lib/creditCardUtils'
 import { toast } from 'sonner'
 import { useTransactionsQuery, useCategoriesQuery, useAccountsQuery, useInvalidateFinancialData, QUERY_KEYS } from '@/hooks/useFinancialData'
 import { useQueryClient } from '@tanstack/react-query'
@@ -94,57 +94,71 @@ function InvoiceRow({
             className="overflow-hidden bg-white border-t border-slate-100"
           >
             <div className="px-4 sm:px-5 py-2 flex flex-col divide-y divide-slate-100/70">
-              {[...invoice.transactions].sort((a,b) => new Date(b.date).getTime() - new Date(a.date).getTime()).map(t => (
-                <div 
-                  key={t.id} 
-                  onClick={() => onSelect(t)}
-                  className="flex items-start gap-3 py-2.5 group cursor-pointer hover:bg-slate-50/80 -mx-2 px-2 rounded-lg transition-colors"
-                >
-                  <div className="w-8 h-8 rounded-lg bg-slate-100 flex items-center justify-center shrink-0 mt-0.5">
-                    {t.category?.icon ? (
-                      <span className="text-sm">{t.category.icon}</span>
-                    ) : (
-                      <CreditCard className="w-4 h-4 text-slate-500" />
-                    )}
-                  </div>
-                  <div className="min-w-0 flex-1 space-y-0.5">
-                    <div className="flex items-baseline justify-between gap-2 min-w-0">
-                      <p className={`text-xs sm:text-sm font-bold truncate min-w-0 flex-1 ${invoice.isPaid ? 'text-slate-500 line-through opacity-70' : 'text-slate-800'}`}>
-                        {t.description}
-                      </p>
-                      <span className={`text-xs sm:text-sm font-bold tabular-nums whitespace-nowrap shrink-0 ${t.ignore_in_cashflow ? 'text-slate-400 line-through' : invoice.isPaid ? 'text-rose-400/70 line-through' : 'text-rose-600'}`}>
-                        - {currencyFmt.format(Number(t.amount))}
-                      </span>
+              {[...invoice.transactions].sort((a,b) => new Date(b.date).getTime() - new Date(a.date).getTime()).map(t => {
+                const isIncome = t.type === 'income'
+                return (
+                  <div 
+                    key={t.id} 
+                    onClick={() => onSelect(t)}
+                    className="flex items-start gap-3 py-2.5 group cursor-pointer hover:bg-slate-50/80 -mx-2 px-2 rounded-lg transition-colors"
+                  >
+                    <div className="w-8 h-8 rounded-lg bg-slate-100 flex items-center justify-center shrink-0 mt-0.5">
+                      {t.category?.icon ? (
+                        <span className="text-sm">{t.category.icon}</span>
+                      ) : (
+                        <CreditCard className="w-4 h-4 text-slate-500" />
+                      )}
                     </div>
-                    <div className="flex items-center justify-between text-[11px] text-slate-400 font-medium min-w-0">
-                      <div className="flex items-center gap-1.5 min-w-0 flex-1">
-                        <span className="truncate max-w-[120px] sm:max-w-none">{t.category?.name || 'Sem Categoria'}</span>
-                        <span>· {new Date(t.date + 'T12:00:00').toLocaleDateString('pt-BR')}</span>
-                        {t.installment_id && (
-                          <span className="px-1.5 py-0.2 rounded text-[9px] font-bold bg-slate-100 text-slate-600 shrink-0">Parcelado</span>
-                        )}
+                    <div className="min-w-0 flex-1 space-y-0.5">
+                      <div className="flex items-baseline justify-between gap-2 min-w-0">
+                        <p className={`text-xs sm:text-sm font-bold truncate min-w-0 flex-1 flex items-center gap-1.5 ${invoice.isPaid ? 'text-slate-500 line-through opacity-70' : 'text-slate-800'}`}>
+                          <span>{t.description}</span>
+                          {isIncome && (
+                            <span className="text-[9px] font-bold text-emerald-700 bg-emerald-50 px-1.5 py-0.2 rounded border border-emerald-200 shrink-0 no-underline">
+                              Estorno
+                            </span>
+                          )}
+                        </p>
+                        <span className={`text-xs sm:text-sm font-bold tabular-nums whitespace-nowrap shrink-0 ${
+                          t.ignore_in_cashflow
+                            ? 'text-slate-400 line-through'
+                            : invoice.isPaid
+                              ? (isIncome ? 'text-emerald-500/70 line-through' : 'text-rose-400/70 line-through')
+                              : (isIncome ? 'text-emerald-600' : 'text-rose-600')
+                        }`}>
+                          {isIncome ? `+ ${currencyFmt.format(Number(t.amount))}` : `- ${currencyFmt.format(Number(t.amount))}`}
+                        </span>
                       </div>
-                      <div className="flex items-center gap-0.5 opacity-90 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity shrink-0">
-                        <button
-                          onClick={(e) => { e.stopPropagation(); onSelect(t); }}
-                          className="p-1 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-all"
-                          title="Editar / Ver Detalhes"
-                        >
-                          <Edit2 className="w-3.5 h-3.5" />
-                        </button>
-                        <button
-                          onClick={(e) => { e.stopPropagation(); onDelete(t.id); }}
-                          disabled={isPending}
-                          className="p-1 text-slate-400 hover:text-rose-600 hover:bg-rose-100 rounded-lg transition-all disabled:opacity-50"
-                          title="Excluir"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
+                      <div className="flex items-center justify-between text-[11px] text-slate-400 font-medium min-w-0">
+                        <div className="flex items-center gap-1.5 min-w-0 flex-1">
+                          <span className="truncate max-w-[120px] sm:max-w-none">{t.category?.name || 'Sem Categoria'}</span>
+                          <span>· {new Date(t.date + 'T12:00:00').toLocaleDateString('pt-BR')}</span>
+                          {t.installment_id && (
+                            <span className="px-1.5 py-0.2 rounded text-[9px] font-bold bg-slate-100 text-slate-600 shrink-0">Parcelado</span>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-0.5 opacity-90 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity shrink-0">
+                          <button
+                            onClick={(e) => { e.stopPropagation(); onSelect(t); }}
+                            className="p-1 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-all"
+                            title="Editar / Ver Detalhes"
+                          >
+                            <Edit2 className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            onClick={(e) => { e.stopPropagation(); onDelete(t.id); }}
+                            disabled={isPending}
+                            className="p-1 text-slate-400 hover:text-rose-600 hover:bg-rose-100 rounded-lg transition-all disabled:opacity-50"
+                            title="Excluir"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
                       </div>
                     </div>
                   </div>
-                </div>
-              ))}
+                )
+              })}
             </div>
           </motion.div>
         )}
@@ -327,8 +341,7 @@ export function TransactionsClient({
       if (isCCTransaction && acc) {
         const closingDay = (acc as any).closing_day || 1
         const dueDay = (acc as any).due_day || 10
-        const cycles = getCreditCardCycles(closingDay, dueDay, new Date(t.date + 'T12:00:00'))
-        const dueDate = cycles.current.dueDate
+        const dueDate = getCreditCardDueDate(t.date, closingDay, dueDay)
         
         const refMonth = dueDate.getMonth() === 0 ? 11 : dueDate.getMonth() - 1
         const refYear = dueDate.getMonth() === 0 ? dueDate.getFullYear() - 1 : dueDate.getFullYear()
@@ -355,33 +368,47 @@ export function TransactionsClient({
     })
 
     transactions.forEach(t => {
-      if (t.type === 'transfer' && t.destination_account_id) {
-        const destAcc = accounts.find(a => a.id === t.destination_account_id)
-        if (destAcc?.type === 'credit_card' && invoicesByCard[destAcc.id]) {
-          const closingDay = (destAcc as any).closing_day || 1
-          const dueDay = (destAcc as any).due_day || 10
-          
-          const sampleTx = invoicesByCard[destAcc.id].transactions[0]
-          if (sampleTx) {
-            const sampleCycles = getCreditCardCycles(closingDay, dueDay, new Date(sampleTx.date + 'T12:00:00'))
-            const cycleEndStr = sampleCycles.current.end.toISOString().split('T')[0]
-            
-            const txDate = new Date(t.date + 'T12:00:00')
-            const paymentTargetCycle = getCreditCardCycles(closingDay, dueDay, txDate)
-            const targetClosing = (txDate > paymentTargetCycle.previous.end && txDate <= paymentTargetCycle.current.end)
-              ? paymentTargetCycle.previous.end
-              : paymentTargetCycle.current.end
+      if (t.status !== 'posted' && t.status !== 'paid_planned') return
 
-            if (targetClosing.toISOString().split('T')[0] === cycleEndStr) {
-              invoicesByCard[destAcc.id].payments += Number(t.amount)
-            }
+      const isTransferPayment = t.type === 'transfer' && t.destination_account_id
+      const desc = (t.description || '').toLowerCase()
+      const catName = (t.category?.name || '').toLowerCase()
+
+      Object.values(invoicesByCard).forEach(inv => {
+        const destAcc = inv.account
+        const isDestMatch = Boolean(isTransferPayment && t.destination_account_id === destAcc.id)
+
+        let isKeywordMatch = false
+        if (!isDestMatch && (desc.includes('pagamento') || desc.includes('fatura') || catName.includes('fatura'))) {
+          const cardName = (destAcc.name || '').toLowerCase()
+          if (cardName && desc.includes(cardName)) isKeywordMatch = true
+          else if (cardName.includes('nubank') && (desc.includes('nubank') || desc.includes('nu '))) isKeywordMatch = true
+          else if (cardName.includes('picpay') && desc.includes('picpay')) isKeywordMatch = true
+          else if (cardName.includes('inter') && desc.includes('inter')) isKeywordMatch = true
+          else if ((cardName.includes('itaú') || cardName.includes('itau')) && desc.includes('itau')) isKeywordMatch = true
+        }
+
+        if (isDestMatch || isKeywordMatch) {
+          const payDate = new Date(t.date + 'T12:00:00')
+          const payClosingKey = getPaymentTargetClosingKey(destAcc, payDate)
+
+          const matchesInvoice = inv.transactions.some(tx => {
+            const txClosingKey = getTxInvoiceClosingKey(destAcc, new Date(tx.date + 'T12:00:00'))
+            if (txClosingKey === payClosingKey) return true
+
+            const txDueDate = getCreditCardDueDate(tx.date, (destAcc as any).closing_day || 1, (destAcc as any).due_day || 10)
+            return payDate.getMonth() === txDueDate.getMonth() && payDate.getFullYear() === txDueDate.getFullYear()
+          })
+
+          if (matchesInvoice) {
+            inv.payments += Number(t.amount)
           }
         }
-      }
+      })
     })
 
     Object.values(invoicesByCard).forEach(inv => {
-      inv.isPaid = inv.total <= 0 || inv.payments >= inv.total
+      inv.isPaid = inv.transactions.length > 0 && (inv.total <= 0 || inv.payments > 0)
     })
 
     const sortedNormalDates = Object.entries(itemsByDate).sort(([a], [b]) => b.localeCompare(a))

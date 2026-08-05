@@ -31,7 +31,7 @@ export function useTransactionsQuery(initialData?: any[]) {
       const supabase = createClient()
       const { data, error } = await supabase
         .from('transactions')
-        .select('*, category:categories(id, name, icon, color), account:accounts!transactions_account_id_fkey(id, name)')
+        .select('*, category:categories(id, name, icon, color, is_investment, is_fixed), account:accounts!transactions_account_id_fkey(id, name)')
         .order('date', { ascending: false })
         .limit(500)
 

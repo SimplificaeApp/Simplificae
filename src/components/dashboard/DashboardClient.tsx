@@ -21,7 +21,7 @@ import { useState, useMemo, useCallback } from "react";
 import { Modal } from "@/components/ui/Modal";
 import { CustomSelect } from "@/components/ui/CustomSelect";
 import { TransactionForm } from "@/components/transactions/TransactionForm";
-import { getCreditCardDueDate } from "@/lib/creditCardUtils";
+import { getCreditCardDueDate, getTxInvoiceClosingKey, getPaymentTargetClosingKey } from "@/lib/creditCardUtils";
 import { Lock } from "lucide-react";
 import dynamic from "next/dynamic";
 import { useTransactionsQuery, useCategoriesQuery, useAccountsQuery } from "@/hooks/useFinancialData";
@@ -155,9 +155,11 @@ export function DashboardClient({
   const [detailModal, setDetailModal] = useState<{
     title: string;
     subtitle?: string;
-    type: 'balance' | 'incomes' | 'expenses' | 'result' | 'category' | 'account';
+    type: 'balance' | 'incomes' | 'expenses' | 'result' | 'category' | 'account' | 'day' | 'month';
     categoryName?: string;
     accountId?: string;
+    dayNumber?: number;
+    monthName?: string;
   } | null>(null);
 
   const chartEvents = useMemo(() => ({
@@ -245,11 +247,18 @@ export function DashboardClient({
     if (isCreditCard) {
       if (t.status === 'paid_planned') return true;
 
-      const hasInvoicePayment = transactions.some(other =>
-        isInvoicePaymentTx(other) &&
-        (other as any).destination_account_id === t.account_id &&
-        (other.status === 'posted' || other.status === 'paid_planned')
-      );
+      const tDate = new Date(t.date + 'T12:00:00');
+      const tClosingKey = getTxInvoiceClosingKey(acc, tDate);
+
+      const hasInvoicePayment = transactions.some(other => {
+        if (!isInvoicePaymentTx(other)) return false;
+        if ((other as any).destination_account_id !== t.account_id) return false;
+        if (other.status !== 'posted' && other.status !== 'paid_planned') return false;
+
+        const payDate = new Date(other.date + 'T12:00:00');
+        const payClosingKey = getPaymentTargetClosingKey(acc, payDate);
+        return payClosingKey === tClosingKey;
+      });
       return hasInvoicePayment;
     }
 
@@ -277,15 +286,57 @@ export function DashboardClient({
     return { startDate, endDate };
   }, []);
 
+  const dailyChartEvents = useMemo(() => ({
+    click: (params: any) => {
+      const rawVal = params?.name ?? params?.axisValue ?? (Array.isArray(params?.value) ? params.value[0] : params?.value);
+      const dayNum = Number(rawVal);
+      if (dayNum && !isNaN(dayNum)) {
+        const monthName = MONTHS[cyclePeriod.startDate.getMonth()];
+        setDetailModal({
+          title: `Lançamentos do Dia ${dayNum} de ${monthName}`,
+          subtitle: `Movimentações financeiras no dia ${dayNum} de ${monthName}`,
+          type: 'day',
+          dayNumber: dayNum
+        });
+      }
+    }
+  }), [cyclePeriod]);
+
+  const macroChartEvents = useMemo(() => ({
+    click: (params: any) => {
+      if (params.name) {
+        setDetailModal({
+          title: `Lançamentos de ${params.name}`,
+          subtitle: `Movimentações financeiras consolidadas em ${params.name}`,
+          type: 'month',
+          monthName: params.name
+        });
+      }
+    }
+  }), []);
+
   const getTransactionEffectiveDate = useCallback((t: Transaction) => {
     const acc = t.account_id ? accountsMap[t.account_id] : ((t as any).account || null);
-    if (acc && acc.type === 'credit_card' && t.type === 'expense') {
+    if (acc && acc.type === 'credit_card' && (t.type === 'expense' || t.type === 'income')) {
       const closingDay = Number((acc as any).closing_day) || 1;
       const dueDay = Number((acc as any).due_day) || 10;
       return getCreditCardDueDate(t.date, closingDay, dueDay);
     }
     return new Date(t.date + 'T12:00:00');
   }, [accountsMap]);
+
+  const isTxInvestment = useCallback((t: Transaction) => {
+    const catId = (t as any).category_id || t.category?.id;
+    const catFromList = categories.find(c => c.id === catId);
+    
+    if (catFromList && (catFromList.is_investment === true || (catFromList as any).is_investment === 'true')) return true;
+    if (t.category && ((t.category as any).is_investment === true || (t.category as any).is_investment === 'true')) return true;
+
+    const catName = (catFromList?.name || t.category?.name || '').toLowerCase();
+    if (catName.includes('renda fixa') || catName.includes('investimento') || catName.includes('ações') || catName.includes('acoes') || catName.includes('fiis') || catName.includes('cripto') || catName.includes('aporte')) return true;
+
+    return false;
+  }, [categories]);
 
   // Isolate current month transactions for KPIs strictly by effective date and confirmed status
   const currentMonthTx = useMemo(() => {
@@ -296,17 +347,6 @@ export function DashboardClient({
         const isConfirmed = isTxConfirmed(t);
         if (!isConfirmed && !isInvoicePaymentTx(t)) return false;
 
-        // Check if invoice payment transfer should be ignored (only ignore if individual CC purchases are already confirmed for that card)
-        if (isInvoicePaymentTx(t)) {
-          const destCardId = (t as any).destination_account_id;
-          const hasIndividualCCExpenses = filteredTx.some(other =>
-            other.account_id === destCardId &&
-            other.type === 'expense' &&
-            isTxConfirmed(other)
-          );
-          if (hasIndividualCCExpenses) return false;
-        }
-
         const txEffectiveDate = getTransactionEffectiveDate(t);
         return txEffectiveDate >= cyclePeriod.startDate && txEffectiveDate <= cyclePeriod.endDate;
       })
@@ -316,22 +356,23 @@ export function DashboardClient({
   // KPIs (Only Current Month)
   const totalIncomes = useMemo(
     () => currentMonthTx.filter((t) => {
-      if (t.type !== "income") return false;
+      if (t.type !== "income" || isTxInvestment(t)) return false;
       const acc = t.account_id ? accountsMap[t.account_id] : ((t as any).account || null);
       return !acc || acc.type !== 'credit_card';
     }).reduce((acc, t) => acc + Number(t.amount), 0),
-    [currentMonthTx, accountsMap]
+    [currentMonthTx, accountsMap, isTxInvestment]
   );
 
   const totalExpenses = useMemo(
     () => currentMonthTx.reduce((acc, t) => {
+      if (isTxInvestment(t)) return acc;
       const accObj = t.account_id ? accountsMap[t.account_id] : ((t as any).account || null);
       const isCC = Boolean(accObj && accObj.type === 'credit_card');
       if (t.type === 'expense') return acc + Number(t.amount);
       if (isCC && t.type === 'income') return acc - Number(t.amount);
       return acc;
     }, 0),
-    [currentMonthTx, accountsMap]
+    [currentMonthTx, accountsMap, isTxInvestment]
   );
   const availableBalance = useMemo(
     () => {
@@ -386,15 +427,34 @@ export function DashboardClient({
     for (let d = 1; d <= daysInMonth; d++) days[d] = { income: 0, expense: 0 };
 
     currentMonthTx.forEach((t) => {
-      const day = new Date(t.date + 'T12:00:00').getDate();
-      if (days[day]) {
+      const txDate = new Date(t.date + 'T12:00:00');
+      if (isInvoicePaymentTx(t)) {
+        if (txDate.getMonth() === cyclePeriod.startDate.getMonth() && txDate.getFullYear() === cyclePeriod.startDate.getFullYear()) {
+          const day = txDate.getDate();
+          if (days[day]) {
+            days[day].expense += Number(t.amount);
+          }
+        }
+      } else {
         const acc = t.account_id ? accountsMap[t.account_id] : ((t as any).account || null);
         const isCC = Boolean(acc && acc.type === 'credit_card');
-        if (t.type === "income") {
-          if (!isCC) days[day].income += Number(t.amount);
-          else days[day].expense -= Number(t.amount);
+
+        if (isCC) {
+          const cardId = t.account_id;
+          const hasPaymentInMonth = currentMonthTx.some(other => isInvoicePaymentTx(other) && (other as any).destination_account_id === cardId);
+          if (hasPaymentInMonth) return;
         }
-        if (t.type === "expense") days[day].expense += Number(t.amount);
+
+        if (txDate.getMonth() === cyclePeriod.startDate.getMonth() && txDate.getFullYear() === cyclePeriod.startDate.getFullYear()) {
+          const day = txDate.getDate();
+          if (days[day]) {
+            if (t.type === "income" && !isTxInvestment(t)) {
+              if (!isCC) days[day].income += Number(t.amount);
+              else days[day].expense -= Number(t.amount);
+            }
+            if (t.type === "expense" && !isTxInvestment(t)) days[day].expense += Number(t.amount);
+          }
+        }
       }
     });
 
@@ -403,13 +463,13 @@ export function DashboardClient({
       Receitas: v.income,
       Despesas: v.expense,
     }));
-  }, [currentMonthTx, cyclePeriod, accountsMap]);
+  }, [currentMonthTx, cyclePeriod, accountsMap, isTxInvestment, isInvoicePaymentTx]);
 
   // Donut data: top categories by expense amount (Only Current Month)
   const donutData = useMemo(() => {
     const catMap = new Map<string, { name: string; icon: string; value: number }>();
     currentMonthTx.forEach((t) => {
-      if (t.type === "expense") {
+      if (t.type === "expense" && !isTxInvestment(t)) {
         const resolvedCat = t.category || categories.find(c => c.id === (t as any).category_id);
         const catName = resolvedCat?.name || "Outros Gastos";
         const catIcon = resolvedCat?.icon || "🏷️";
@@ -441,7 +501,7 @@ export function DashboardClient({
         ...item,
         color: VIBRANT_PALETTE[idx % VIBRANT_PALETTE.length]
       }));
-  }, [currentMonthTx, categories]);
+  }, [currentMonthTx, categories, isTxInvestment]);
 
   // Donut data: top categories by income amount (Only Current Month)
   const donutIncomeData = useMemo(() => {
@@ -493,53 +553,73 @@ export function DashboardClient({
         const isConfirmed = isTxConfirmed(t);
         if (!isConfirmed && !isInvoicePaymentTx(t)) return;
 
-        if (isInvoicePaymentTx(t)) {
-          const destCardId = (t as any).destination_account_id;
-          const hasIndividualCCExpenses = filteredTx.some(other =>
-            other.account_id === destCardId &&
-            other.type === 'expense' &&
-            isTxConfirmed(other)
-          );
-          if (hasIndividualCCExpenses) return;
-        }
+        const txDate = new Date(t.date + 'T12:00:00');
+        if (txDate >= targetMonthStart && txDate <= targetMonthEnd) {
+          if (isInvoicePaymentTx(t)) {
+            exp += Number(t.amount);
+          } else {
+            const acc = t.account_id ? accountsMap[t.account_id] : ((t as any).account || null);
+            const isCC = Boolean(acc && acc.type === 'credit_card');
 
-        const txEffectiveDate = getTransactionEffectiveDate(t);
-        if (txEffectiveDate >= targetMonthStart && txEffectiveDate <= targetMonthEnd) {
-          const acc = t.account_id ? accountsMap[t.account_id] : ((t as any).account || null);
-          const isCC = Boolean(acc && acc.type === 'credit_card');
-          if (t.type === 'income') {
-            if (!isCC) inc += Number(t.amount);
-            else exp -= Number(t.amount);
+            if (isCC) {
+              const cardId = t.account_id;
+              const hasPaymentInMonth = filteredTx.some(other => isInvoicePaymentTx(other) && (other as any).destination_account_id === cardId && new Date(other.date + 'T12:00:00') >= targetMonthStart && new Date(other.date + 'T12:00:00') <= targetMonthEnd);
+              if (hasPaymentInMonth) return;
+            }
+
+            if (t.type === 'income' && !isTxInvestment(t)) {
+              if (!isCC) inc += Number(t.amount);
+              else exp -= Number(t.amount);
+            }
+            if (t.type === 'expense' && !isTxInvestment(t)) exp += Number(t.amount);
           }
-          if (t.type === 'expense') exp += Number(t.amount);
         }
       });
       const monthLabel = new Intl.DateTimeFormat('pt-BR', { month: 'short' }).format(targetMonthStart);
       data.push({ name: monthLabel.charAt(0).toUpperCase() + monthLabel.slice(1), Receitas: inc, Despesas: exp });
     }
     return data;
-  }, [filteredTx, isInvoicePaymentTx, isTxConfirmed, getTransactionEffectiveDate, accountsMap]);
+  }, [filteredTx, isInvoicePaymentTx, isTxConfirmed, accountsMap, isTxInvestment]);
 
   // ECharts options — Area Chart (Fluxo Diário)
   const areaChartOption = useMemo(() => ({
-    grid: { top: 16, right: 16, bottom: 24, left: 54, containLabel: false },
+    grid: { top: 20, right: 16, bottom: 20, left: 45, containLabel: true },
+    dataZoom: [
+      {
+        type: 'inside',
+        start: 0,
+        end: 100,
+        zoomOnMouseWheel: true,
+        moveOnMouseMove: true,
+        moveOnTouch: true,
+        zoomOnPinch: true
+      }
+    ],
     tooltip: {
       trigger: 'axis',
+      extraCssText: 'z-index: 50 !important;',
       backgroundColor: 'rgba(255,255,255,0.97)',
       borderColor: '#e2e8f0',
       borderWidth: 1,
       borderRadius: 12,
       padding: [10, 14],
       textStyle: { color: '#334155', fontSize: 12, fontFamily: 'inherit' },
-      formatter: (params: any[]) => {
-        const income = params.find((p: any) => p.seriesName === 'Receitas')?.value || 0
-        const expense = params.find((p: any) => p.seriesName === 'Despesas')?.value || 0
-        const result = income - expense
-        const fmt = (v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
-        return `<div style="font-size:11px;font-weight:700;color:#64748b;margin-bottom:6px">Dia ${params[0].axisValue}</div>` +
+      axisPointer: {
+        type: 'line',
+        lineStyle: { color: '#10b981', width: 1.5, type: 'dashed' }
+      },
+      formatter: (params: any) => {
+        const list = Array.isArray(params) ? params : [params];
+        if (!list.length) return '';
+        const day = list[0]?.axisValue ?? list[0]?.name ?? '';
+        const income = list.find((p: any) => p.seriesName === 'Receitas')?.value || 0;
+        const expense = list.find((p: any) => p.seriesName === 'Despesas')?.value || 0;
+        const result = income - expense;
+        const fmt = (v: number) => Number(v).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+        return `<div style="font-size:11px;font-weight:700;color:#64748b;margin-bottom:6px">Dia ${day}</div>` +
           `<div style="display:flex;justify-content:space-between;gap:16px;margin-bottom:4px"><span style="color:#64748b">Receitas</span><span style="color:#10b981;font-weight:800">${fmt(income)}</span></div>` +
           `<div style="display:flex;justify-content:space-between;gap:16px;margin-bottom:8px"><span style="color:#64748b">Despesas</span><span style="color:#f43f5e;font-weight:800">${fmt(expense)}</span></div>` +
-          `<div style="border-top:1px solid #f1f5f9;padding-top:8px;display:flex;justify-content:space-between;gap:16px"><span style="color:#64748b">Resultado</span><span style="color:${result >= 0 ? '#10b981' : '#f43f5e'};font-weight:900">${result >= 0 ? '+' : ''}${fmt(result)}</span></div>`
+          `<div style="border-top:1px solid #f1f5f9;padding-top:8px;display:flex;justify-content:space-between;gap:16px"><span style="color:#64748b">Resultado</span><span style="color:${result >= 0 ? '#10b981' : '#f43f5e'};font-weight:900">${result >= 0 ? '+' : ''}${fmt(result)}</span></div>`;
       }
     },
     legend: { show: false },
@@ -548,13 +628,15 @@ export function DashboardClient({
     series: [
       {
         name: 'Receitas', type: 'line', data: areaData.map(d => d.Receitas),
-        smooth: true, symbol: 'none', lineStyle: { color: '#10b981', width: 2.5 },
+        smooth: true, symbol: 'circle', symbolSize: 10, showSymbol: true,
+        lineStyle: { color: '#10b981', width: 2.5 },
         areaStyle: { color: { type: 'linear', x: 0, y: 0, x2: 0, y2: 1, colorStops: [{ offset: 0, color: 'rgba(16,185,129,0.28)' }, { offset: 1, color: 'rgba(16,185,129,0)' }] } },
         animationDuration: 1200, animationEasing: 'cubicOut'
       },
       {
         name: 'Despesas', type: 'line', data: areaData.map(d => d.Despesas),
-        smooth: true, symbol: 'none', lineStyle: { color: '#f43f5e', width: 2.5 },
+        smooth: true, symbol: 'circle', symbolSize: 10, showSymbol: true,
+        lineStyle: { color: '#f43f5e', width: 2.5 },
         areaStyle: { color: { type: 'linear', x: 0, y: 0, x2: 0, y2: 1, colorStops: [{ offset: 0, color: 'rgba(244,63,94,0.18)' }, { offset: 1, color: 'rgba(244,63,94,0)' }] } },
         animationDuration: 1400, animationEasing: 'cubicOut'
       }
@@ -570,23 +652,38 @@ export function DashboardClient({
       left: 16,
       containLabel: true
     },
+    dataZoom: [
+      {
+        type: 'inside',
+        start: 0,
+        end: 100,
+        zoomOnMouseWheel: true,
+        moveOnMouseMove: true,
+        moveOnTouch: true,
+        zoomOnPinch: true
+      }
+    ],
     tooltip: {
       trigger: 'axis',
+      extraCssText: 'z-index: 50 !important;',
       backgroundColor: 'rgba(255,255,255,0.97)',
       borderColor: '#e2e8f0',
       borderWidth: 1,
       borderRadius: 12,
       padding: [10, 14],
       textStyle: { color: '#334155', fontSize: 12, fontFamily: 'inherit' },
-      formatter: (params: any[]) => {
-        const inc = params.find((p: any) => p.seriesName === 'Receitas')?.value || 0
-        const exp = params.find((p: any) => p.seriesName === 'Despesas')?.value || 0
-        const result = inc - exp
-        const fmt = (v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
-        return `<div style="font-size:11px;font-weight:700;color:#64748b;margin-bottom:6px">${params[0].axisValue}</div>` +
+      formatter: (params: any) => {
+        const list = Array.isArray(params) ? params : [params];
+        if (!list.length) return '';
+        const month = list[0]?.axisValue ?? list[0]?.name ?? '';
+        const inc = list.find((p: any) => p.seriesName === 'Receitas')?.value || 0;
+        const exp = list.find((p: any) => p.seriesName === 'Despesas')?.value || 0;
+        const result = inc - exp;
+        const fmt = (v: number) => Number(v).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+        return `<div style="font-size:11px;font-weight:700;color:#64748b;margin-bottom:6px">${month}</div>` +
           `<div style="display:flex;justify-content:space-between;gap:16px;margin-bottom:4px"><span style="color:#64748b">Receitas</span><span style="color:#10b981;font-weight:800">${fmt(inc)}</span></div>` +
           `<div style="display:flex;justify-content:space-between;gap:16px;margin-bottom:8px"><span style="color:#64748b">Despesas</span><span style="color:#f43f5e;font-weight:800">${fmt(exp)}</span></div>` +
-          `<div style="border-top:1px solid #f1f5f9;padding-top:8px;display:flex;justify-content:space-between;gap:16px"><span style="color:#64748b">Líquido</span><span style="color:${result >= 0 ? '#10b981' : '#f43f5e'};font-weight:900">${result >= 0 ? '+' : ''}${fmt(result)}</span></div>`
+          `<div style="border-top:1px solid #f1f5f9;padding-top:8px;display:flex;justify-content:space-between;gap:16px"><span style="color:#64748b">Líquido</span><span style="color:${result >= 0 ? '#10b981' : '#f43f5e'};font-weight:900">${result >= 0 ? '+' : ''}${fmt(result)}</span></div>`;
       }
     },
     legend: {
@@ -1007,11 +1104,11 @@ export function DashboardClient({
               </div>
             </div>
 
-            <div className="h-64 sm:h-72 w-full">
+            <div className="h-64 sm:h-72 w-full cursor-pointer">
               {activeChartTab === 'fluxo' ? (
-                <ReactECharts notMerge={true} lazyUpdate={true} option={areaChartOption} style={{ height: '100%', width: '100%' }} />
+                <ReactECharts notMerge={true} lazyUpdate={true} option={areaChartOption} onEvents={dailyChartEvents} style={{ height: '100%', width: '100%' }} />
               ) : (
-                <ReactECharts notMerge={true} lazyUpdate={true} option={macroBarOption} style={{ height: '100%', width: '100%' }} />
+                <ReactECharts notMerge={true} lazyUpdate={true} option={macroBarOption} onEvents={macroChartEvents} style={{ height: '100%', width: '100%' }} />
               )}
             </div>
           </motion.div>
@@ -1412,7 +1509,7 @@ export function DashboardClient({
                 <div>
                   <div className="text-xs font-bold text-rose-800 uppercase">Total de Saídas no Mês</div>
                   <div className="text-[11px] text-rose-600 font-medium">
-                    {currentMonthTx.filter(t => t.type === 'expense').length} lançamentos
+                    {currentMonthTx.filter(t => t.type === 'expense' && !isTxInvestment(t)).length} lançamentos
                   </div>
                 </div>
                 <div className="text-xl font-black text-rose-600 tabular-nums">
@@ -1421,7 +1518,7 @@ export function DashboardClient({
               </div>
 
               <div className="max-h-80 overflow-y-auto divide-y divide-slate-100 pr-1">
-                {currentMonthTx.filter(t => t.type === 'expense').map(t => {
+                {currentMonthTx.filter(t => t.type === 'expense' && !isTxInvestment(t)).map(t => {
                   const acc = t.account_id ? accountsMap[t.account_id] : ((t as any).account || null);
                   return (
                     <div key={t.id} className="py-2.5 flex justify-between items-center text-xs">
@@ -1588,6 +1685,220 @@ export function DashboardClient({
                         ))
                       ) : (
                         <div className="py-8 text-center text-xs text-slate-400">Nenhuma movimentação cadastrada nesta conta no mês</div>
+                      )}
+                    </div>
+                  </>
+                );
+              })()}
+            </div>
+          )}
+
+          {/* 7. Lançamentos do Dia Detail */}
+          {detailModal?.type === 'day' && detailModal.dayNumber && (
+            <div className="space-y-3">
+              {(() => {
+                const dayNum = detailModal.dayNumber;
+                const dayTx = currentMonthTx.filter(t => {
+                  const txDate = new Date(t.date + 'T12:00:00');
+                  return txDate.getDate() === dayNum &&
+                         txDate.getMonth() === cyclePeriod.startDate.getMonth() &&
+                         txDate.getFullYear() === cyclePeriod.startDate.getFullYear();
+                });
+
+                const dayIncomes = dayTx.filter(t => t.type === 'income' && !isTxInvestment(t) && !(t.account_id && accountsMap[t.account_id]?.type === 'credit_card')).reduce((acc, t) => acc + Number(t.amount), 0);
+                const dayExpenses = dayTx.filter(t => {
+                  if (isTxInvestment(t)) return false;
+                  const acc = t.account_id ? accountsMap[t.account_id] : ((t as any).account || null);
+                  if (acc?.type === 'credit_card') return false;
+                  return t.type === 'expense' || isInvoicePaymentTx(t);
+                }).reduce((acc, t) => acc + Number(t.amount), 0);
+                const dayResult = dayIncomes - dayExpenses;
+
+                return (
+                  <>
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 sm:gap-2.5">
+                      <div className="p-2.5 sm:p-3 rounded-2xl bg-emerald-50 border border-emerald-100 flex sm:flex-col justify-between items-center sm:items-start">
+                        <div className="text-[10px] sm:text-[11px] font-bold text-emerald-800 uppercase">Entradas</div>
+                        <div className="text-xs sm:text-sm font-black text-emerald-600 tabular-nums">
+                          {globalBlur && !isUnlocked ? '••••' : currencyFmt.format(dayIncomes)}
+                        </div>
+                      </div>
+                      <div className="p-2.5 sm:p-3 rounded-2xl bg-rose-50 border border-rose-100 flex sm:flex-col justify-between items-center sm:items-start">
+                        <div className="text-[10px] sm:text-[11px] font-bold text-rose-800 uppercase">Saídas</div>
+                        <div className="text-xs sm:text-sm font-black text-rose-600 tabular-nums">
+                          {globalBlur && !isUnlocked ? '••••' : currencyFmt.format(dayExpenses)}
+                        </div>
+                      </div>
+                      <div className={`p-2.5 sm:p-3 rounded-2xl border flex sm:flex-col justify-between items-center sm:items-start ${dayResult >= 0 ? 'bg-emerald-50 border-emerald-200' : 'bg-rose-50 border-rose-200'}`}>
+                        <div className="text-[10px] sm:text-[11px] font-bold text-slate-700 uppercase">Balanço</div>
+                        <div className={`text-xs sm:text-sm font-black tabular-nums ${dayResult >= 0 ? 'text-emerald-700' : 'text-rose-600'}`}>
+                          {globalBlur && !isUnlocked ? '••••' : `${dayResult >= 0 ? '+' : ''}${currencyFmt.format(dayResult)}`}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="max-h-80 overflow-y-auto divide-y divide-slate-100 pr-1">
+                      {dayTx.length > 0 ? (
+                        dayTx.map(t => {
+                          const acc = t.account_id ? accountsMap[t.account_id] : ((t as any).account || null);
+                          const isCC = Boolean(acc && acc.type === 'credit_card');
+                          const isInc = t.type === 'income';
+                          const isInvest = isTxInvestment(t);
+                          return (
+                            <div key={t.id} className="py-2.5 flex items-center justify-between gap-2 text-xs">
+                              <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                                <span className={`w-8 h-8 rounded-xl flex items-center justify-center font-bold text-sm shrink-0 ${isInc ? 'bg-emerald-50 text-emerald-600' : isInvest ? 'bg-blue-50 text-blue-600' : isCC ? 'bg-indigo-50 text-indigo-600' : 'bg-rose-50 text-rose-600'}`}>
+                                  {t.category?.icon || (isInc ? '🟢' : isInvest ? '💎' : isCC ? '💳' : '🔻')}
+                                </span>
+                                <div className="min-w-0 flex-1">
+                                  <div className="font-bold text-slate-800 flex flex-wrap items-center gap-1.5 leading-tight">
+                                    <span className="truncate">{t.description}</span>
+                                    {isInvest && (
+                                      <span className="text-[9px] font-bold text-blue-700 bg-blue-50 px-1.5 py-0.2 rounded border border-blue-200 shrink-0">
+                                        Investimento
+                                      </span>
+                                    )}
+                                    {isCC && t.type === 'expense' && (
+                                      <span className="text-[9px] font-bold text-indigo-700 bg-indigo-50 px-1.5 py-0.2 rounded border border-indigo-200 shrink-0">
+                                        💳 Cartão (Fatura Futura)
+                                      </span>
+                                    )}
+                                  </div>
+                                  <div className="text-[11px] text-slate-400 font-medium flex flex-wrap items-center gap-1 mt-0.5">
+                                    <span>{t.category?.name || (isInc ? 'Receita' : 'Despesa')}</span>
+                                    {acc && (
+                                      <span className="text-[10px] font-bold text-slate-600 bg-slate-100 border border-slate-200/80 px-1.5 py-0.2 rounded-md inline-flex items-center gap-1 shrink-0">
+                                        {acc.type === 'credit_card' ? '💳' : '🏦'} {acc.name}
+                                      </span>
+                                    )}
+                                    <span>· {new Date(t.date + 'T12:00:00').toLocaleDateString('pt-BR')}</span>
+                                  </div>
+                                </div>
+                              </div>
+                              <span className={`font-black tabular-nums shrink-0 ${isInc ? 'text-emerald-600' : isInvest ? 'text-blue-600' : isCC ? 'text-indigo-600 font-bold bg-indigo-50/80 px-2 py-0.5 rounded-lg border border-indigo-100' : 'text-rose-600'}`}>
+                                {isCC && t.type === 'expense' ? '' : isInc ? '+' : '-'}{globalBlur && !isUnlocked ? '••••' : currencyFmt.format(Number(t.amount))}
+                              </span>
+                            </div>
+                          );
+                        })
+                      ) : (
+                        <div className="py-8 text-center text-xs text-slate-400">Nenhum lançamento registrado neste dia</div>
+                      )}
+                    </div>
+                  </>
+                );
+              })()}
+            </div>
+          )}
+
+          {/* 8. Lançamentos do Mês Macro Detail */}
+          {detailModal?.type === 'month' && detailModal.monthName && (
+            <div className="space-y-3">
+              {(() => {
+                const monthName = detailModal.monthName.toLowerCase();
+                const now = new Date();
+
+                let targetStart: Date | null = null;
+                let targetEnd: Date | null = null;
+
+                for (let i = -5; i <= 0; i++) {
+                  const mStart = new Date(now.getFullYear(), now.getMonth() + i, 1, 0, 0, 0);
+                  const label = new Intl.DateTimeFormat('pt-BR', { month: 'short' }).format(mStart).toLowerCase();
+                  if (label.includes(monthName) || monthName.includes(label)) {
+                    targetStart = mStart;
+                    targetEnd = new Date(now.getFullYear(), now.getMonth() + i + 1, 0, 23, 59, 59);
+                    break;
+                  }
+                }
+
+                const monthTx = targetStart && targetEnd
+                  ? filteredTx.filter(t => {
+                      if (t.ignore_in_cashflow) return false;
+                      const isConfirmed = isTxConfirmed(t);
+                      if (!isConfirmed && !isInvoicePaymentTx(t)) return false;
+                      const txDate = new Date(t.date + 'T12:00:00');
+                      return txDate >= targetStart! && txDate <= targetEnd!;
+                    })
+                  : [];
+
+                const monthIncomes = monthTx.filter(t => t.type === 'income' && !isTxInvestment(t) && !(t.account_id && accountsMap[t.account_id]?.type === 'credit_card')).reduce((acc, t) => acc + Number(t.amount), 0);
+                const monthExpenses = monthTx.filter(t => {
+                  if (isTxInvestment(t)) return false;
+                  const acc = t.account_id ? accountsMap[t.account_id] : ((t as any).account || null);
+                  if (acc?.type === 'credit_card') return false;
+                  return t.type === 'expense' || isInvoicePaymentTx(t);
+                }).reduce((acc, t) => acc + Number(t.amount), 0);
+                const monthResult = monthIncomes - monthExpenses;
+
+                return (
+                  <>
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 sm:gap-2.5">
+                      <div className="p-2.5 sm:p-3 rounded-2xl bg-emerald-50 border border-emerald-100 flex sm:flex-col justify-between items-center sm:items-start">
+                        <div className="text-[10px] sm:text-[11px] font-bold text-emerald-800 uppercase">Receitas</div>
+                        <div className="text-xs sm:text-sm font-black text-emerald-600 tabular-nums">
+                          {globalBlur && !isUnlocked ? '••••' : currencyFmt.format(monthIncomes)}
+                        </div>
+                      </div>
+                      <div className="p-2.5 sm:p-3 rounded-2xl bg-rose-50 border border-rose-100 flex sm:flex-col justify-between items-center sm:items-start">
+                        <div className="text-[10px] sm:text-[11px] font-bold text-rose-800 uppercase">Despesas</div>
+                        <div className="text-xs sm:text-sm font-black text-rose-600 tabular-nums">
+                          {globalBlur && !isUnlocked ? '••••' : currencyFmt.format(monthExpenses)}
+                        </div>
+                      </div>
+                      <div className={`p-2.5 sm:p-3 rounded-2xl border flex sm:flex-col justify-between items-center sm:items-start ${monthResult >= 0 ? 'bg-emerald-50 border-emerald-200' : 'bg-rose-50 border-rose-200'}`}>
+                        <div className="text-[10px] sm:text-[11px] font-bold text-slate-700 uppercase">Balanço</div>
+                        <div className={`text-xs sm:text-sm font-black tabular-nums ${monthResult >= 0 ? 'text-emerald-700' : 'text-rose-600'}`}>
+                          {globalBlur && !isUnlocked ? '••••' : `${monthResult >= 0 ? '+' : ''}${currencyFmt.format(monthResult)}`}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="max-h-80 overflow-y-auto divide-y divide-slate-100 pr-1">
+                      {monthTx.length > 0 ? (
+                        monthTx.map(t => {
+                          const acc = t.account_id ? accountsMap[t.account_id] : ((t as any).account || null);
+                          const isCC = Boolean(acc && acc.type === 'credit_card');
+                          const isInc = t.type === 'income';
+                          const isInvest = isTxInvestment(t);
+                          return (
+                            <div key={t.id} className="py-2.5 flex items-center justify-between gap-2 text-xs">
+                              <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                                <span className={`w-8 h-8 rounded-xl flex items-center justify-center font-bold text-sm shrink-0 ${isInc ? 'bg-emerald-50 text-emerald-600' : isInvest ? 'bg-blue-50 text-blue-600' : isCC ? 'bg-indigo-50 text-indigo-600' : 'bg-rose-50 text-rose-600'}`}>
+                                  {t.category?.icon || (isInc ? '🟢' : isInvest ? '💎' : isCC ? '💳' : '🔻')}
+                                </span>
+                                <div className="min-w-0 flex-1">
+                                  <div className="font-bold text-slate-800 flex flex-wrap items-center gap-1.5 leading-tight">
+                                    <span className="truncate">{t.description}</span>
+                                    {isInvest && (
+                                      <span className="text-[9px] font-bold text-blue-700 bg-blue-50 px-1.5 py-0.2 rounded border border-blue-200 shrink-0">
+                                        Investimento
+                                      </span>
+                                    )}
+                                    {isCC && t.type === 'expense' && (
+                                      <span className="text-[9px] font-bold text-indigo-700 bg-indigo-50 px-1.5 py-0.2 rounded border border-indigo-200 shrink-0">
+                                        💳 Cartão (Fatura Futura)
+                                      </span>
+                                    )}
+                                  </div>
+                                  <div className="text-[11px] text-slate-400 font-medium flex flex-wrap items-center gap-1 mt-0.5">
+                                    <span>{t.category?.name || (isInc ? 'Receita' : 'Despesa')}</span>
+                                    {acc && (
+                                      <span className="text-[10px] font-bold text-slate-600 bg-slate-100 border border-slate-200/80 px-1.5 py-0.2 rounded-md inline-flex items-center gap-1 shrink-0">
+                                        {acc.type === 'credit_card' ? '💳' : '🏦'} {acc.name}
+                                      </span>
+                                    )}
+                                    <span>· {new Date(t.date + 'T12:00:00').toLocaleDateString('pt-BR')}</span>
+                                  </div>
+                                </div>
+                              </div>
+                              <span className={`font-black tabular-nums shrink-0 ${isInc ? 'text-emerald-600' : isInvest ? 'text-blue-600' : isCC ? 'text-indigo-600 font-bold bg-indigo-50/80 px-2 py-0.5 rounded-lg border border-indigo-100' : 'text-rose-600'}`}>
+                                {isCC && t.type === 'expense' ? '' : isInc ? '+' : '-'}{globalBlur && !isUnlocked ? '••••' : currencyFmt.format(Number(t.amount))}
+                              </span>
+                            </div>
+                          );
+                        })
+                      ) : (
+                        <div className="py-8 text-center text-xs text-slate-400">Nenhum lançamento neste mês</div>
                       )}
                     </div>
                   </>
