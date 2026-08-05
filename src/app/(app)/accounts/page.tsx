@@ -9,10 +9,14 @@ export default async function AccountsPage() {
 
   const [
     { data: { user } },
-    { data: workspaces }
+    { data: workspaces },
+    { data: accounts },
+    { data: categories }
   ] = await Promise.all([
     supabase.auth.getUser(),
-    supabase.from('workspaces').select('id, name, type').order('created_at', { ascending: true })
+    supabase.from('workspaces').select('id, name, type').order('created_at', { ascending: true }),
+    supabase.from('accounts').select('*, account_vaults(*)').order('created_at', { ascending: true }),
+    supabase.from('categories').select('*').order('name', { ascending: true })
   ])
 
   if (!user) {
@@ -29,8 +33,8 @@ export default async function AccountsPage() {
       </div>
       <AccountsClient 
         workspaceId={currentWorkspace?.id} 
-        accounts={[]} 
-        categories={[]}
+        accounts={accounts || []} 
+        categories={categories || []}
       />
     </main>
   )

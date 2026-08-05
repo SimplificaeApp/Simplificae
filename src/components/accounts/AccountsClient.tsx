@@ -12,7 +12,7 @@ import { deleteAccount, editAccountBalance, toggleAccountHidden } from '@/app/ac
 import { deleteVault, editVaultBalance, toggleVaultHidden } from '@/app/actions/vaults'
 import { toast } from 'sonner'
 import { usePrivacy } from '@/components/providers/PrivacyProvider'
-import { useAccountsQuery, useInvalidateFinancialData, QUERY_KEYS } from '@/hooks/useFinancialData'
+import { useAccountsQuery, useCategoriesQuery, useInvalidateFinancialData, QUERY_KEYS } from '@/hooks/useFinancialData'
 import { useQueryClient } from '@tanstack/react-query'
 import { enqueueMutation } from '@/lib/offlineSync'
 
@@ -22,16 +22,18 @@ type Account = { id: string; name: string; type: string; initial_balance: number
 export function AccountsClient({
   workspaceId,
   accounts: initialAccounts,
-  categories = []
+  categories: initialCategories = []
 }: {
   workspaceId?: string
   accounts: Account[]
   categories?: any[]
 }) {
   const { data: cachedAccounts } = useAccountsQuery(initialAccounts)
+  const { data: cachedCategories } = useCategoriesQuery(initialCategories)
   const invalidateData = useInvalidateFinancialData()
   const queryClient = useQueryClient()
   const accounts = (cachedAccounts || initialAccounts).filter(a => a.type !== 'credit_card')
+  const categories = cachedCategories || initialCategories
   const [isAccountModalOpen, setIsAccountModalOpen] = useState(false)
   const [isVaultModalOpen, setIsVaultModalOpen] = useState(false)
   const [selectedAccountId, setSelectedAccountId] = useState<string | null>(null)
