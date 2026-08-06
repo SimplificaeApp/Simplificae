@@ -125,7 +125,9 @@ export function calculateCardBalances(card: any, transactions: any[]) {
     
     // Gastos no cartão (account_id = card.id)
     if (tx.account_id === card.id && tx.type === 'expense') {
-      totalBalance += amt
+      if (!tx.is_recurring) {
+        totalBalance += amt
+      }
       
       if (txDate <= cycles.previous.end) {
         previousGross += amt
@@ -141,7 +143,9 @@ export function calculateCardBalances(card: any, transactions: any[]) {
     
     // Estornos / Créditos no cartão (account_id = card.id && type = 'income')
     if (tx.account_id === card.id && tx.type === 'income') {
-      totalBalance -= amt
+      if (!tx.is_recurring) {
+        totalBalance -= amt
+      }
       
       if (txDate <= cycles.previous.end) {
         previousGross -= amt
